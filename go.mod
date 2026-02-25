@@ -13,7 +13,7 @@ require (
 	github.com/json-iterator/go v1.1.12
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/open-policy-agent/opa v1.13.1
-	github.com/osac-project/fulfillment-common v0.0.39
+	github.com/osac-project/fulfillment-common v0.0.40
 	github.com/prometheus/client_golang v1.23.2
 	go.uber.org/mock v0.6.0
 	go.yaml.in/yaml/v2 v2.4.3
