@@ -24,7 +24,7 @@ managed:
 
 inputs:
 
-- module: buf.build/osac-project/fulfillment-api:v0.0.33
+- directory: ../fulfillment-api
 - directory: proto
 
 plugins:
