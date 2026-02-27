@@ -7,6 +7,6 @@ deps:
   - name: buf.build/grpc-ecosystem/grpc-gateway
     commit: 6467306b4f624747aaf6266762ee7a1c
     digest: b5:c2caa61467d992749812c909f93c07e9a667da33c758a7c1973d63136c23b3cafcc079985b12cdf54a10049ed3297418f1eda42cdffdcf34113792dcc3a990af
-  - name: buf.build/innabox/fulfillment-api
-    commit: f46018041c3b443db3d29aaf508e0882
+  - name: buf.build/osac-project/fulfillment-api
+    commit: cbc445843376405286985483e9c6af47
     digest: b5:75136fcc568ecd422bf73d3f055a4d8b7eec4949a93d4522c54728b0d5cce13dd020ca3658f2a38bbff23145da1254ec0ac288075315815e0a221ab5bc1583f5
