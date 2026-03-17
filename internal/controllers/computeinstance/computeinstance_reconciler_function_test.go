@@ -44,6 +44,7 @@ import (
 var _ = Describe("buildSpec", func() {
 	Describe("RestartRequestedAt field", func() {
 		It("Includes restartRequestedAt in spec map when present", func() {
+			ctx := context.Background()
 			requestedAt := time.Date(2026, 1, 28, 13, 27, 0, 0, time.UTC)
 			cpuCores, err := anypb.New(wrapperspb.String("2"))
 			Expect(err).ToNot(HaveOccurred())
@@ -51,6 +52,7 @@ var _ = Describe("buildSpec", func() {
 			Expect(err).ToNot(HaveOccurred())
 			template := "osac.templates.ocp_virt_vm"
 			task := &task{
+				r: &function{logger: logger},
 				computeInstance: privatev1.ComputeInstance_builder{
 					Id: "test-instance-123",
 					Spec: privatev1.ComputeInstanceSpec_builder{
@@ -65,7 +67,7 @@ var _ = Describe("buildSpec", func() {
 			}
 
 			// Call the actual buildSpec function
-			spec, err := task.buildSpec()
+			spec, err := task.buildSpec(ctx)
 			Expect(err).ToNot(HaveOccurred())
 
 			// Verify restartRequestedAt was added with correct format
@@ -77,8 +79,10 @@ var _ = Describe("buildSpec", func() {
 		})
 
 		It("Includes explicit fields in spec map when present", func() {
+			ctx := context.Background()
 			template := "osac.templates.ocp_virt_vm"
 			task := &task{
+				r: &function{logger: logger},
 				computeInstance: privatev1.ComputeInstance_builder{
 					Id: "test-explicit-fields",
 					Spec: privatev1.ComputeInstanceSpec_builder{
@@ -107,7 +111,7 @@ var _ = Describe("buildSpec", func() {
 				userDataSecretName: "test-explicit-fields-user-data",
 			}
 
-			spec, err := task.buildSpec()
+			spec, err := task.buildSpec(ctx)
 			Expect(err).ToNot(HaveOccurred())
 
 			Expect(spec["cores"]).To(Equal(int64(4)))
@@ -137,8 +141,10 @@ var _ = Describe("buildSpec", func() {
 		})
 
 		It("Excludes explicit fields from spec map when not set", func() {
+			ctx := context.Background()
 			template := "osac.templates.ocp_virt_vm"
 			task := &task{
+				r: &function{logger: logger},
 				computeInstance: privatev1.ComputeInstance_builder{
 					Id: "test-no-explicit-fields",
 					Spec: privatev1.ComputeInstanceSpec_builder{
@@ -147,7 +153,7 @@ var _ = Describe("buildSpec", func() {
 				}.Build(),
 			}
 
-			spec, err := task.buildSpec()
+			spec, err := task.buildSpec(ctx)
 			Expect(err).ToNot(HaveOccurred())
 
 			Expect(spec).ToNot(HaveKey("cores"))
@@ -161,12 +167,14 @@ var _ = Describe("buildSpec", func() {
 		})
 
 		It("Excludes restartRequestedAt from spec map when not set", func() {
+			ctx := context.Background()
 			cpuCores, err := anypb.New(wrapperspb.String("1"))
 			Expect(err).ToNot(HaveOccurred())
 			memory, err := anypb.New(wrapperspb.String("2Gi"))
 			Expect(err).ToNot(HaveOccurred())
 			template := "osac.templates.ocp_virt_vm"
 			task := &task{
+				r: &function{logger: logger},
 				computeInstance: privatev1.ComputeInstance_builder{
 					Id: "test-instance-456",
 					Spec: privatev1.ComputeInstanceSpec_builder{
@@ -181,7 +189,7 @@ var _ = Describe("buildSpec", func() {
 			}
 
 			// Call the actual buildSpec function
-			spec, err := task.buildSpec()
+			spec, err := task.buildSpec(ctx)
 			Expect(err).ToNot(HaveOccurred())
 
 			// Verify restartRequestedAt was NOT added
