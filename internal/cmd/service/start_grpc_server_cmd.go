@@ -597,6 +597,19 @@ func (c *startGrpcServerCommandRunner) run(cmd *cobra.Command, argv []string) er
 	}
 	privatev1.RegisterHubsServer(grpcServer, privateHubsServer)
 
+	// Create the virtual networks server:
+	c.logger.InfoContext(ctx, "Creating virtual networks server")
+	virtualNetworksServer, err := servers.NewVirtualNetworksServer().
+		SetLogger(c.logger).
+		SetNotifier(notifier).
+		SetAttributionLogic(publicAttributionLogic).
+		SetTenancyLogic(publicTenancyLogic).
+		Build()
+	if err != nil {
+		return fmt.Errorf("failed to create virtual networks server: %w", err)
+	}
+	publicv1.RegisterVirtualNetworksServer(grpcServer, virtualNetworksServer)
+
 	// Create the private virtual networks server:
 	c.logger.InfoContext(ctx, "Creating private virtual networks server")
 	privateVirtualNetworksServer, err := servers.NewPrivateVirtualNetworksServer().
@@ -610,6 +623,19 @@ func (c *startGrpcServerCommandRunner) run(cmd *cobra.Command, argv []string) er
 	}
 	privatev1.RegisterVirtualNetworksServer(grpcServer, privateVirtualNetworksServer)
 
+	// Create the subnets server:
+	c.logger.InfoContext(ctx, "Creating subnets server")
+	subnetsServer, err := servers.NewSubnetsServer().
+		SetLogger(c.logger).
+		SetNotifier(notifier).
+		SetAttributionLogic(publicAttributionLogic).
+		SetTenancyLogic(publicTenancyLogic).
+		Build()
+	if err != nil {
+		return fmt.Errorf("failed to create subnets server: %w", err)
+	}
+	publicv1.RegisterSubnetsServer(grpcServer, subnetsServer)
+
 	// Create the private subnets server:
 	c.logger.InfoContext(ctx, "Creating private subnets server")
 	privateSubnetsServer, err := servers.NewPrivateSubnetsServer().
@@ -622,6 +648,45 @@ func (c *startGrpcServerCommandRunner) run(cmd *cobra.Command, argv []string) er
 		return fmt.Errorf("failed to create private subnets server: %w", err)
 	}
 	privatev1.RegisterSubnetsServer(grpcServer, privateSubnetsServer)
+
+	// Create the security groups server:
+	c.logger.InfoContext(ctx, "Creating security groups server")
+	securityGroupsServer, err := servers.NewSecurityGroupsServer().
+		SetLogger(c.logger).
+		SetNotifier(notifier).
+		SetAttributionLogic(publicAttributionLogic).
+		SetTenancyLogic(publicTenancyLogic).
+		Build()
+	if err != nil {
+		return fmt.Errorf("failed to create security groups server: %w", err)
+	}
+	publicv1.RegisterSecurityGroupsServer(grpcServer, securityGroupsServer)
+
+	// Create the private security groups server:
+	c.logger.InfoContext(ctx, "Creating private security groups server")
+	privateSecurityGroupsServer, err := servers.NewPrivateSecurityGroupsServer().
+		SetLogger(c.logger).
+		SetNotifier(notifier).
+		SetAttributionLogic(privateAttributionLogic).
+		SetTenancyLogic(privateTenancyLogic).
+		Build()
+	if err != nil {
+		return fmt.Errorf("failed to create private security groups server: %w", err)
+	}
+	privatev1.RegisterSecurityGroupsServer(grpcServer, privateSecurityGroupsServer)
+
+	// Create the network classes server:
+	c.logger.InfoContext(ctx, "Creating network classes server")
+	networkClassesServer, err := servers.NewNetworkClassesServer().
+		SetLogger(c.logger).
+		SetNotifier(notifier).
+		SetAttributionLogic(publicAttributionLogic).
+		SetTenancyLogic(publicTenancyLogic).
+		Build()
+	if err != nil {
+		return fmt.Errorf("failed to create network classes server: %w", err)
+	}
+	publicv1.RegisterNetworkClassesServer(grpcServer, networkClassesServer)
 
 	// Create the private network classes server:
 	c.logger.InfoContext(ctx, "Creating private network classes server")
