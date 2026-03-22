@@ -84,6 +84,14 @@ var NetworkClass = schema.GroupVersionKind{
 
 var NetworkClassList = listGVK(NetworkClass)
 
+var SecurityGroup = schema.GroupVersionKind{
+	Group:   "osac.openshift.io",
+	Version: "v1alpha1",
+	Kind:    "SecurityGroup",
+}
+
+var SecurityGroupList = listGVK(SecurityGroup)
+
 func listGVK(gvk schema.GroupVersionKind) schema.GroupVersionKind {
 	gvk.Kind = gvk.Kind + "List"
 	return gvk
