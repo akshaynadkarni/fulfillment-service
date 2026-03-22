@@ -17,9 +17,11 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 
 	grpccodes "google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	privatev1 "github.com/osac-project/fulfillment-service/internal/api/osac/private/v1"
 	"github.com/osac-project/fulfillment-service/internal/auth"
@@ -171,16 +173,20 @@ func (s *PrivateComputeInstancesServer) Create(ctx context.Context,
 
 func (s *PrivateComputeInstancesServer) Update(ctx context.Context,
 	request *privatev1.ComputeInstancesUpdateRequest) (response *privatev1.ComputeInstancesUpdateResponse, err error) {
-	// Validate network references:
-	err = s.validateNetworkReferences(ctx, request.GetObject())
-	if err != nil {
-		return
+	// Only validate fields affected by the update mask. With a field mask the object
+	// is sparse so validating fields absent from it would fail incorrectly.
+	mask := request.GetUpdateMask()
+	if hasMaskPrefix(mask, "spec.subnet", "spec.security_groups") {
+		err = s.validateNetworkReferences(ctx, request.GetObject())
+		if err != nil {
+			return
+		}
 	}
-
-	// Validate template:
-	err = s.validateTemplate(ctx, request.GetObject())
-	if err != nil {
-		return
+	if hasMaskPrefix(mask, "spec.template", "spec.template_parameters") {
+		err = s.validateTemplate(ctx, request.GetObject())
+		if err != nil {
+			return
+		}
 	}
 
 	err = s.generic.Update(ctx, request, &response)
@@ -256,6 +262,20 @@ func (s *PrivateComputeInstancesServer) validateTemplate(ctx context.Context, vm
 	spec.SetTemplateParameters(actualVmParameters)
 
 	return nil
+}
+
+func hasMaskPrefix(mask *fieldmaskpb.FieldMask, prefixes ...string) bool {
+	if mask == nil || len(mask.GetPaths()) == 0 {
+		return true
+	}
+	for _, path := range mask.GetPaths() {
+		for _, prefix := range prefixes {
+			if path == prefix || strings.HasPrefix(path, prefix+".") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // validateNetworkReferences validates that referenced Subnet and SecurityGroups exist, are in READY state,

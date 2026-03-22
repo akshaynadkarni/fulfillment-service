@@ -253,17 +253,24 @@ func (s *ComputeInstancesServer) Update(ctx context.Context,
 		return
 	}
 
-	// Get the existing object from the private server:
-	getRequest := &privatev1.ComputeInstancesGetRequest{}
-	getRequest.SetId(id)
-	getResponse, err := s.delegate.Get(ctx, getRequest)
-	if err != nil {
-		return nil, err
+	// Determine how to prepare the private compute instance based on whether there's a field mask.
+	// When there's a field mask, copy to a new object and let the generic server handle the merge
+	// with the database object, which correctly applies field mask semantics.
+	var privateComputeInstance *privatev1.ComputeInstance
+	updateMask := request.GetUpdateMask()
+	if len(updateMask.GetPaths()) > 0 {
+		privateComputeInstance = &privatev1.ComputeInstance{}
+		privateComputeInstance.SetId(id)
+	} else {
+		getRequest := &privatev1.ComputeInstancesGetRequest{}
+		getRequest.SetId(id)
+		getResponse, err := s.delegate.Get(ctx, getRequest)
+		if err != nil {
+			return nil, err
+		}
+		privateComputeInstance = getResponse.GetObject()
 	}
-	existingPrivateComputeInstance := getResponse.GetObject()
-
-	// Map the public changes to the existing private object (preserving private data):
-	err = s.inMapper.Copy(ctx, publicComputeInstance, existingPrivateComputeInstance)
+	err = s.inMapper.Copy(ctx, publicComputeInstance, privateComputeInstance)
 	if err != nil {
 		s.logger.ErrorContext(
 			ctx,
@@ -274,9 +281,10 @@ func (s *ComputeInstancesServer) Update(ctx context.Context,
 		return
 	}
 
-	// Delegate to the private server with the merged object:
+	// Delegate to the private server:
 	privateRequest := &privatev1.ComputeInstancesUpdateRequest{}
-	privateRequest.SetObject(existingPrivateComputeInstance)
+	privateRequest.SetObject(privateComputeInstance)
+	privateRequest.SetUpdateMask(updateMask)
 	privateResponse, err := s.delegate.Update(ctx, privateRequest)
 	if err != nil {
 		return nil, err

@@ -23,6 +23,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	privatev1 "github.com/osac-project/fulfillment-service/internal/api/osac/private/v1"
@@ -338,13 +339,22 @@ var _ = Describe("Compute instances server", func() {
 		It("Updates object", func() {
 			// Create templates first
 			createTemplate("general.small")
-			createTemplate("general.large")
 
-			// Create an object:
+			// Create an object with explicit fields:
 			createResponse, err := server.Create(ctx, publicv1.ComputeInstancesCreateRequest_builder{
 				Object: publicv1.ComputeInstance_builder{
 					Spec: publicv1.ComputeInstanceSpec_builder{
-						Template: "general.small",
+						Template:    "general.small",
+						Cores:       proto.Int32(4),
+						MemoryGib:   proto.Int32(8),
+						RunStrategy: proto.String("Always"),
+						Image: publicv1.ComputeInstanceImage_builder{
+							SourceType: "registry",
+							SourceRef:  "quay.io/test:latest",
+						}.Build(),
+						BootDisk: publicv1.ComputeInstanceDisk_builder{
+							SizeGib: 20,
+						}.Build(),
 					}.Build(),
 					Status: publicv1.ComputeInstanceStatus_builder{
 						State: publicv1.ComputeInstanceState_COMPUTE_INSTANCE_STATE_STARTING,
@@ -352,34 +362,50 @@ var _ = Describe("Compute instances server", func() {
 				}.Build(),
 			}.Build())
 			Expect(err).ToNot(HaveOccurred())
-			Expect(createResponse).ToNot(BeNil())
-			createdObject := createResponse.GetObject()
-			Expect(createdObject).ToNot(BeNil())
-			id := createdObject.GetId()
-			Expect(id).ToNot(BeEmpty())
+			id := createResponse.GetObject().GetId()
 
-			// Update the object:
+			// Update only restart_requested_at via field mask, explicit fields must survive:
+			restartTime := timestamppb.Now()
 			updateResponse, err := server.Update(ctx, publicv1.ComputeInstancesUpdateRequest_builder{
 				Object: publicv1.ComputeInstance_builder{
 					Id: id,
 					Spec: publicv1.ComputeInstanceSpec_builder{
-						Template: "general.large",
-					}.Build(),
-					Status: publicv1.ComputeInstanceStatus_builder{
-						State: publicv1.ComputeInstanceState_COMPUTE_INSTANCE_STATE_RUNNING,
+						RestartRequestedAt: restartTime,
 					}.Build(),
 				}.Build(),
 				UpdateMask: &fieldmaskpb.FieldMask{
-					Paths: []string{"spec.template", "status.state"},
+					Paths: []string{"spec.restart_requested_at"},
 				},
 			}.Build())
 			Expect(err).ToNot(HaveOccurred())
-			Expect(updateResponse).ToNot(BeNil())
 			object := updateResponse.GetObject()
-			Expect(object).ToNot(BeNil())
 			Expect(object.GetId()).To(Equal(id))
-			Expect(object.GetSpec().GetTemplate()).To(Equal("general.large"))
-			Expect(object.GetStatus().GetState()).To(Equal(publicv1.ComputeInstanceState_COMPUTE_INSTANCE_STATE_RUNNING))
+
+			// Verify the masked field was updated:
+			Expect(object.GetSpec().GetRestartRequestedAt().AsTime()).To(
+				BeTemporally("~", restartTime.AsTime()),
+			)
+
+			// Verify explicit fields were preserved:
+			Expect(object.GetSpec().GetTemplate()).To(Equal("general.small"))
+			Expect(object.GetSpec().GetCores()).To(BeNumerically("==", 4))
+			Expect(object.GetSpec().GetMemoryGib()).To(BeNumerically("==", 8))
+			Expect(object.GetSpec().GetRunStrategy()).To(Equal("Always"))
+			Expect(object.GetSpec().GetImage().GetSourceRef()).To(Equal("quay.io/test:latest"))
+			Expect(object.GetSpec().GetBootDisk().GetSizeGib()).To(BeNumerically("==", 20))
+
+			// Verify they survive a round-trip through the database:
+			getResponse, err := server.Get(ctx, publicv1.ComputeInstancesGetRequest_builder{
+				Id: id,
+			}.Build())
+			Expect(err).ToNot(HaveOccurred())
+			fetched := getResponse.GetObject()
+			Expect(fetched.GetSpec().GetCores()).To(BeNumerically("==", 4))
+			Expect(fetched.GetSpec().GetMemoryGib()).To(BeNumerically("==", 8))
+			Expect(fetched.GetSpec().GetRunStrategy()).To(Equal("Always"))
+			Expect(fetched.GetSpec().GetImage().GetSourceRef()).To(Equal("quay.io/test:latest"))
+			Expect(fetched.GetSpec().GetBootDisk().GetSizeGib()).To(BeNumerically("==", 20))
+			Expect(fetched.GetSpec().GetRestartRequestedAt()).ToNot(BeNil())
 		})
 
 		It("Deletes object", func() {
