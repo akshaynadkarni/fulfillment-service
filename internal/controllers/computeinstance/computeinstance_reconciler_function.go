@@ -174,6 +174,11 @@ func (t *task) update(ctx context.Context) error {
 	// Save the selected hub in the private data of the compute instance:
 	t.computeInstance.GetStatus().SetHub(t.hubId)
 
+	// Check Tenant readiness before creating/updating the hub CR:
+	if err := t.checkTenantReady(ctx); err != nil {
+		return err
+	}
+
 	// Get the K8S object:
 	object, err := t.getKubeObject(ctx)
 	if err != nil {
@@ -275,6 +280,54 @@ func (t *task) setConditionDefaults(value privatev1.ComputeInstanceConditionType
 func (t *task) validateTenant() error {
 	if !t.computeInstance.HasMetadata() || len(t.computeInstance.GetMetadata().GetTenants()) != 1 {
 		return errors.New("Compute instance must have exactly one tenant assigned")
+	}
+	return nil
+}
+
+// checkTenantReady queries the Tenant CR on the hub cluster and checks the StorageClassReady
+// condition. Returns an error if the condition is explicitly False, allowing the reconciler
+// to retry later. If the Tenant is not found or has no conditions, processing continues
+// (the osac-operator on the hub handles missing/new Tenants separately).
+func (t *task) checkTenantReady(ctx context.Context) error {
+	tenantName := t.computeInstance.GetMetadata().GetTenants()[0]
+
+	// TODO(MGMT-23404): t.hubNamespace assumes Tenant CRs live in the same namespace as
+	// ComputeInstance CRs. This matches the current osac-operator deployment where
+	// OSAC_TENANT_NAMESPACE == OSAC_COMPUTE_INSTANCE_NAMESPACE == operator pod namespace.
+	// If they are split in the future, the Hub CR should expose a separate tenantNamespace
+	// field, and this call should use it instead.
+	tenant := &unstructured.Unstructured{}
+	tenant.SetGroupVersionKind(gvks.Tenant)
+	err := t.hubClient.Get(ctx, clnt.ObjectKey{
+		Namespace: t.hubNamespace,
+		Name:      tenantName,
+	}, tenant)
+	if err != nil {
+		t.r.logger.WarnContext(ctx, "Could not check Tenant readiness, proceeding with provisioning",
+			slog.String("tenant", tenantName), slog.Any("error", err))
+		return nil
+	}
+
+	conditions, found, _ := unstructured.NestedSlice(tenant.Object, "status", "conditions")
+	if !found {
+		return nil
+	}
+
+	for _, c := range conditions {
+		cond, ok := c.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		condType, _, _ := unstructured.NestedString(cond, "type")
+		if condType != "StorageClassReady" {
+			continue
+		}
+		status, _, _ := unstructured.NestedString(cond, "status")
+		if status == "False" {
+			message, _, _ := unstructured.NestedString(cond, "message")
+			return fmt.Errorf("tenant %q is not ready: %s", tenantName, message)
+		}
+		break
 	}
 	return nil
 }

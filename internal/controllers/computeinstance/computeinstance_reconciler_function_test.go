@@ -676,6 +676,210 @@ var _ = Describe("buildSpec with subnetRef", func() {
 	})
 })
 
+// newTenantCR creates an unstructured Tenant CR with optional status conditions.
+func newTenantCR(name, namespace string, conditions []interface{}) *unstructured.Unstructured {
+	obj := &unstructured.Unstructured{}
+	obj.SetGroupVersionKind(gvks.Tenant)
+	obj.SetNamespace(namespace)
+	obj.SetName(name)
+	if conditions != nil {
+		_ = unstructured.SetNestedSlice(obj.Object, conditions, "status", "conditions")
+	}
+	return obj
+}
+
+func tenantCondition(condType, status, message string) map[string]interface{} {
+	return map[string]interface{}{
+		"type":    condType,
+		"status":  status,
+		"message": message,
+	}
+}
+
+var _ = Describe("checkTenantReady", func() {
+	const (
+		tenantName   = "test-tenant"
+		hubNamespace = "test-ns"
+	)
+
+	var ctx context.Context
+
+	BeforeEach(func() {
+		ctx = context.Background()
+	})
+
+	It("should return nil when Tenant has StorageClassReady=True", func() {
+		tenant := newTenantCR(tenantName, hubNamespace, []interface{}{
+			tenantCondition("StorageClassReady", "True", "StorageClass found"),
+		})
+
+		scheme := runtime.NewScheme()
+		fakeClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(tenant).
+			Build()
+
+		ci := privatev1.ComputeInstance_builder{
+			Id: "ci-1",
+			Metadata: privatev1.Metadata_builder{
+				Tenants: []string{tenantName},
+			}.Build(),
+		}.Build()
+
+		t := &task{
+			r:               &function{logger: logger},
+			computeInstance: ci,
+			hubNamespace:    hubNamespace,
+			hubClient:       fakeClient,
+		}
+
+		err := t.checkTenantReady(ctx)
+		Expect(err).ToNot(HaveOccurred())
+	})
+
+	It("should return error when Tenant has StorageClassReady=False", func() {
+		tenant := newTenantCR(tenantName, hubNamespace, []interface{}{
+			tenantCondition("StorageClassReady", "False",
+				"Multiple StorageClasses found for tenant \"test-tenant\": [sc-a, sc-b]"),
+		})
+
+		scheme := runtime.NewScheme()
+		fakeClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(tenant).
+			Build()
+
+		ci := privatev1.ComputeInstance_builder{
+			Id: "ci-1",
+			Metadata: privatev1.Metadata_builder{
+				Tenants: []string{tenantName},
+			}.Build(),
+		}.Build()
+
+		t := &task{
+			r:               &function{logger: logger},
+			computeInstance: ci,
+			hubNamespace:    hubNamespace,
+			hubClient:       fakeClient,
+		}
+
+		err := t.checkTenantReady(ctx)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("not ready"))
+		Expect(err.Error()).To(ContainSubstring("Multiple StorageClasses"))
+		Expect(err.Error()).To(ContainSubstring(tenantName))
+	})
+
+	It("should return nil when Tenant CR does not exist", func() {
+		scheme := runtime.NewScheme()
+		fakeClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			Build()
+
+		ci := privatev1.ComputeInstance_builder{
+			Id: "ci-1",
+			Metadata: privatev1.Metadata_builder{
+				Tenants: []string{tenantName},
+			}.Build(),
+		}.Build()
+
+		t := &task{
+			r:               &function{logger: logger},
+			computeInstance: ci,
+			hubNamespace:    hubNamespace,
+			hubClient:       fakeClient,
+		}
+
+		err := t.checkTenantReady(ctx)
+		Expect(err).ToNot(HaveOccurred())
+	})
+
+	It("should return nil when Tenant has no status conditions", func() {
+		tenant := newTenantCR(tenantName, hubNamespace, nil)
+
+		scheme := runtime.NewScheme()
+		fakeClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(tenant).
+			Build()
+
+		ci := privatev1.ComputeInstance_builder{
+			Id: "ci-1",
+			Metadata: privatev1.Metadata_builder{
+				Tenants: []string{tenantName},
+			}.Build(),
+		}.Build()
+
+		t := &task{
+			r:               &function{logger: logger},
+			computeInstance: ci,
+			hubNamespace:    hubNamespace,
+			hubClient:       fakeClient,
+		}
+
+		err := t.checkTenantReady(ctx)
+		Expect(err).ToNot(HaveOccurred())
+	})
+
+	It("should return nil when Tenant has no StorageClassReady condition", func() {
+		tenant := newTenantCR(tenantName, hubNamespace, []interface{}{
+			tenantCondition("SomeOtherCondition", "True", "ok"),
+		})
+
+		scheme := runtime.NewScheme()
+		fakeClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(tenant).
+			Build()
+
+		ci := privatev1.ComputeInstance_builder{
+			Id: "ci-1",
+			Metadata: privatev1.Metadata_builder{
+				Tenants: []string{tenantName},
+			}.Build(),
+		}.Build()
+
+		t := &task{
+			r:               &function{logger: logger},
+			computeInstance: ci,
+			hubNamespace:    hubNamespace,
+			hubClient:       fakeClient,
+		}
+
+		err := t.checkTenantReady(ctx)
+		Expect(err).ToNot(HaveOccurred())
+	})
+
+	It("should return nil when hub client returns an error", func() {
+		scheme := runtime.NewScheme()
+		fakeClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Get: func(ctx context.Context, client clnt.WithWatch, key clnt.ObjectKey, obj clnt.Object, opts ...clnt.GetOption) error {
+					return errors.New("connection refused")
+				},
+			}).
+			Build()
+
+		ci := privatev1.ComputeInstance_builder{
+			Id: "ci-1",
+			Metadata: privatev1.Metadata_builder{
+				Tenants: []string{tenantName},
+			}.Build(),
+		}.Build()
+
+		t := &task{
+			r:               &function{logger: logger},
+			computeInstance: ci,
+			hubNamespace:    hubNamespace,
+			hubClient:       fakeClient,
+		}
+
+		err := t.checkTenantReady(ctx)
+		Expect(err).ToNot(HaveOccurred())
+	})
+})
+
 var _ = Describe("ensureUserDataSecret", func() {
 	const (
 		ciID         = "test-ci-user-data"

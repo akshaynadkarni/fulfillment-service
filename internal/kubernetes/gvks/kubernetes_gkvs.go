@@ -11,6 +11,12 @@ Unless required by applicable law or agreed to in writing, software distributed 
 language governing permissions and limitations under the License.
 */
 
+// Package gvks defines GroupVersionKind constants for Kubernetes resources used by the
+// fulfillment-service via unstructured clients.
+//
+// TODO: These GVK versions are hardcoded. If an OSAC CRD is promoted (e.g. v1alpha1 → v1beta1),
+// every constant here must be updated to match, or API calls will 404. Consider generating
+// these from the osac-operator CRD manifests or sharing a constants package.
 package gvks
 
 import "k8s.io/apimachinery/pkg/runtime/schema"
@@ -91,6 +97,12 @@ var SecurityGroup = schema.GroupVersionKind{
 }
 
 var SecurityGroupList = listGVK(SecurityGroup)
+
+var Tenant = schema.GroupVersionKind{
+	Group:   "osac.openshift.io",
+	Version: "v1alpha1",
+	Kind:    "Tenant",
+}
 
 func listGVK(gvk schema.GroupVersionKind) schema.GroupVersionKind {
 	gvk.Kind = gvk.Kind + "List"
