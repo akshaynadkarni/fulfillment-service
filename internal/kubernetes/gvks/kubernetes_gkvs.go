@@ -98,12 +98,6 @@ var SecurityGroup = schema.GroupVersionKind{
 
 var SecurityGroupList = listGVK(SecurityGroup)
 
-var Tenant = schema.GroupVersionKind{
-	Group:   "osac.openshift.io",
-	Version: "v1alpha1",
-	Kind:    "Tenant",
-}
-
 func listGVK(gvk schema.GroupVersionKind) schema.GroupVersionKind {
 	gvk.Kind = gvk.Kind + "List"
 	return gvk
