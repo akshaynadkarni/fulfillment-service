@@ -15,7 +15,7 @@
 set -e
 
 # Name of the project:
-name="fulfillment-service"
+name="osac-cli"
 
 # Directory containing this script:
 here="$(dirname "$(readlink -f "$0")")"

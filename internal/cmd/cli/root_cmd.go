@@ -41,7 +41,7 @@ func Root() *cobra.Command {
 	runner := &runnerContext{}
 	result := &cobra.Command{
 		Use:               "osac",
-		Short:             "Command line interface for the fulfillment API",
+		Short:             "CLI for the Open Sovereign AI Cloud platform",
 		SilenceUsage:      true,
 		SilenceErrors:     true,
 		PersistentPreRunE: runner.persistentPreRun,
