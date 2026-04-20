@@ -17,9 +17,9 @@ package osac.private.v1;
 
 import "google/api/annotations.proto";
 import "google/protobuf/field_mask.proto";
-import "osac/private/v1/public_ip_pool_type.proto";
+import "osac/private/v1/public_ip_type.proto";
 
-message PublicIPPoolsListRequest {
+message PublicIPsListRequest {
   // Index of the first result. If not specified the default value will be zero.
   optional int32 offset = 1;
 
@@ -32,12 +32,12 @@ message PublicIPPoolsListRequest {
   //
   // The value of this parameter is a [CEL](https://cel.dev) expression used to select which objects to return. The
   // built-in `this` variable refers to the object being tested and `now` refers to the current date and time. If the
-  // expression evaluates to `true` the object is included in the results. For example, to retrieve all IPv4 public
-  // IP pools:
+  // expression evaluates to `true` the object is included in the results. For example, to retrieve all public IPs
+  // in ALLOCATED state:
   //
-  //     this.spec.ip_family == IP_FAMILY_IPV4
+  //     this.status.state == PUBLIC_IP_STATE_ALLOCATED
   //
-  // If this isn't provided, or if the value is empty, then all the public IP pools that the user has permission to see
+  // If this isn't provided, or if the value is empty, then all the public IPs that the user has permission to see
   // will be returned. Not all CEL constructs are currently supported for implementation reasons; see the filter
   // documentation (docs/FILTER.md) for the full details.
   optional string filter = 3;
@@ -45,8 +45,8 @@ message PublicIPPoolsListRequest {
   // Order criteria.
   //
   // The syntax of this parameter is similar to the syntax of the _order by_ clause of a SQL statement, but using the
-  // names of the attributes of the public IP pool instead of the names of the columns of a table. For example, in
-  // order to sort the pools descending by creation time the value should be:
+  // names of the attributes of the public IP instead of the names of the columns of a table. For example, in order
+  // to sort the public IPs descending by creation time the value should be:
   //
   //     metadata.created_at desc
   //
@@ -54,7 +54,7 @@ message PublicIPPoolsListRequest {
   optional string order = 4;
 }
 
-message PublicIPPoolsListResponse {
+message PublicIPsListResponse {
   // Actual number of items returned. Note that this may be smaller than the value requested in the `limit` parameter
   // of the request if there are not enough items, or if the system decides that returning that number of items isn't
   // feasible or convenient for performance reasons.
@@ -65,27 +65,27 @@ message PublicIPPoolsListResponse {
   int32 total = 2;
 
   // List of results.
-  repeated PublicIPPool items = 3;
+  repeated PublicIP items = 3;
 }
 
-message PublicIPPoolsGetRequest {
+message PublicIPsGetRequest {
   string id = 1;
 }
 
-message PublicIPPoolsGetResponse {
-  PublicIPPool object = 1;
+message PublicIPsGetResponse {
+  PublicIP object = 1;
 }
 
-message PublicIPPoolsCreateRequest {
-  PublicIPPool object = 1;
+message PublicIPsCreateRequest {
+  PublicIP object = 1;
 }
 
-message PublicIPPoolsCreateResponse {
-  PublicIPPool object = 1;
+message PublicIPsCreateResponse {
+  PublicIP object = 1;
 }
 
-message PublicIPPoolsUpdateRequest {
-  PublicIPPool object = 1;
+message PublicIPsUpdateRequest {
+  PublicIP object = 1;
   google.protobuf.FieldMask update_mask = 2;
 
   // Lock enables optimistic locking. When set to true, the server verifies that the current version of the object
@@ -94,61 +94,60 @@ message PublicIPPoolsUpdateRequest {
   bool lock = 3;
 }
 
-message PublicIPPoolsUpdateResponse {
-  PublicIPPool object = 1;
+message PublicIPsUpdateResponse {
+  PublicIP object = 1;
 }
 
-message PublicIPPoolsDeleteRequest {
+message PublicIPsDeleteRequest {
   string id = 1;
 }
 
-message PublicIPPoolsDeleteResponse {}
+message PublicIPsDeleteResponse {}
 
-message PublicIPPoolsSignalRequest {
+message PublicIPsSignalRequest {
   string id = 1;
 }
 
-message PublicIPPoolsSignalResponse {}
+message PublicIPsSignalResponse {}
 
-service PublicIPPools {
-  // Retrieves the list of public IP pools.
-  rpc List(PublicIPPoolsListRequest) returns (PublicIPPoolsListResponse) {
-    option (google.api.http) = {get: "/api/private/v1/public_ip_pools"};
+service PublicIPs {
+  // Retrieves the list of public IPs.
+  rpc List(PublicIPsListRequest) returns (PublicIPsListResponse) {
+    option (google.api.http) = {get: "/api/private/v1/public_ips"};
   }
 
-  // Retrieves the details of one specific public IP pool.
-  rpc Get(PublicIPPoolsGetRequest) returns (PublicIPPoolsGetResponse) {
+  // Retrieves the details of one specific public IP.
+  rpc Get(PublicIPsGetRequest) returns (PublicIPsGetResponse) {
     option (google.api.http) = {
-      get: "/api/private/v1/public_ip_pools/{id}"
+      get: "/api/private/v1/public_ips/{id}"
       response_body: "object"
     };
   }
 
-  // Creates a new public IP pool.
-  rpc Create(PublicIPPoolsCreateRequest) returns (PublicIPPoolsCreateResponse) {
+  // Creates a new public IP. The spec.pool field determines which PublicIPPool the address is allocated from.
+  rpc Create(PublicIPsCreateRequest) returns (PublicIPsCreateResponse) {
     option (google.api.http) = {
-      post: "/api/private/v1/public_ip_pools"
+      post: "/api/private/v1/public_ips"
       body: "object"
       response_body: "object"
     };
   }
 
-  // Updates an existing public IP pool. Only metadata fields (name, labels, annotations) are mutable.
-  // All spec fields (cidrs, ip_family, implementation_strategy) are immutable after creation.
-  rpc Update(PublicIPPoolsUpdateRequest) returns (PublicIPPoolsUpdateResponse) {
+  // Updates an existing public IP. The spec.pool field is immutable; only metadata and compute_instance can change.
+  rpc Update(PublicIPsUpdateRequest) returns (PublicIPsUpdateResponse) {
     option (google.api.http) = {
-      patch: "/api/private/v1/public_ip_pools/{object.id}"
+      patch: "/api/private/v1/public_ips/{object.id}"
       body: "object"
       response_body: "object"
     };
   }
 
-  // Deletes a public IP pool. Rejected if allocated PublicIPs still reference this pool.
-  rpc Delete(PublicIPPoolsDeleteRequest) returns (PublicIPPoolsDeleteResponse) {
-    option (google.api.http) = {delete: "/api/private/v1/public_ip_pools/{id}"};
+  // Deletes a public IP. The allocated address is returned to the parent pool's available capacity.
+  rpc Delete(PublicIPsDeleteRequest) returns (PublicIPsDeleteResponse) {
+    option (google.api.http) = {delete: "/api/private/v1/public_ips/{id}"};
   }
 
   // Indicates that something changed in the object or the system that may require reconciling the object.
-  rpc Signal(PublicIPPoolsSignalRequest) returns (PublicIPPoolsSignalResponse) {
+  rpc Signal(PublicIPsSignalRequest) returns (PublicIPsSignalResponse) {
   }
 }
