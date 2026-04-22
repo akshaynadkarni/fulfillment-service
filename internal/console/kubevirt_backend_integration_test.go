@@ -223,9 +223,9 @@ var _ = Describe("KubeVirt Backend Integration", func() {
 	})
 
 	It("should send BearerToken in Authorization header to the server", func() {
-		var receivedAuth string
+		receivedAuth := make(chan string, 1)
 		authServer, err := newMockWSServerWithHandler(func(ws *websocket.Conn) {
-			receivedAuth = ws.Request().Header.Get("Authorization")
+			receivedAuth <- ws.Request().Header.Get("Authorization")
 			ws.PayloadType = websocket.BinaryFrame
 			ws.Write([]byte("authenticated\r\n"))
 			ws.Close()
@@ -257,7 +257,7 @@ var _ = Describe("KubeVirt Backend Integration", func() {
 		n, err := conn.Read(buf)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(string(buf[:n])).To(Equal("authenticated\r\n"))
-		Expect(receivedAuth).To(Equal("Bearer test-token-123"))
+		Expect(receivedAuth).To(Receive(Equal("Bearer test-token-123")))
 	})
 
 	It("should send BearerTokenFile in Authorization header to the server", func() {
@@ -266,9 +266,9 @@ var _ = Describe("KubeVirt Backend Integration", func() {
 		err := os.WriteFile(tokenFile, []byte("file-token-456"), 0600)
 		Expect(err).NotTo(HaveOccurred())
 
-		var receivedAuth string
+		receivedAuth := make(chan string, 1)
 		authServer, err := newMockWSServerWithHandler(func(ws *websocket.Conn) {
-			receivedAuth = ws.Request().Header.Get("Authorization")
+			receivedAuth <- ws.Request().Header.Get("Authorization")
 			ws.PayloadType = websocket.BinaryFrame
 			ws.Write([]byte("ok\r\n"))
 			ws.Close()
@@ -300,6 +300,6 @@ var _ = Describe("KubeVirt Backend Integration", func() {
 		n, err := conn.Read(buf)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(string(buf[:n])).To(Equal("ok\r\n"))
-		Expect(receivedAuth).To(Equal("Bearer file-token-456"))
+		Expect(receivedAuth).To(Receive(Equal("Bearer file-token-456")))
 	})
 })

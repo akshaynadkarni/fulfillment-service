@@ -141,8 +141,9 @@ func (b *kubeVirtBackend) Connect(ctx context.Context, target Target) (io.ReadWr
 		return nil, fmt.Errorf("failed to build auth headers for hub %q: %w", target.HubID, err)
 	}
 	for key, values := range authHeaders {
+		wsConfig.Header.Del(key)
 		for _, value := range values {
-			wsConfig.Header.Set(key, value)
+			wsConfig.Header.Add(key, value)
 		}
 	}
 
@@ -185,9 +186,17 @@ func authHeadersFromConfig(config *rest.Config) (http.Header, error) {
 
 	// RoundTrip populates the request with auth headers, then our capture
 	// round-tripper saves them and returns a sentinel error.
-	_, _ = rt.RoundTrip(req)
+	resp, err := rt.RoundTrip(req)
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
+	if err != nil && !errors.Is(err, errHeaderCaptureOnly) {
+		return nil, fmt.Errorf("failed to apply auth wrappers: %w", err)
+	}
 	return capture.headers, nil
 }
+
+var errHeaderCaptureOnly = errors.New("header capture only")
 
 // headerCaptureRoundTripper is a fake http.RoundTripper that saves the request
 // headers set by transport wrappers (auth, user-agent, impersonation) without
@@ -201,7 +210,7 @@ func (h *headerCaptureRoundTripper) RoundTrip(req *http.Request) (*http.Response
 	// Return an error rather than nil response — the RoundTripper contract
 	// requires a valid *http.Response or an error, and a nil response would
 	// panic any wrapper that tries to access it.
-	return nil, errors.New("header capture only")
+	return nil, errHeaderCaptureOnly
 }
 
 // HubConfigProviderFromKubeconfigs returns a HubConfigProvider that builds
