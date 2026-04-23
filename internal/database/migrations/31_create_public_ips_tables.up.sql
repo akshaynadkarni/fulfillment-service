@@ -49,14 +49,14 @@ create table archived_public_ips (
   data jsonb not null
 );
 
--- Add indexes on the name column for fast lookups:
+-- Indexes on the active table:
 create index public_ips_by_name on public_ips (name);
-
--- Add indexes on the creators column for owner-based queries:
 create index public_ips_by_owner on public_ips using gin (creators);
-
--- Add indexes on the tenants column for tenant isolation:
 create index public_ips_by_tenant on public_ips using gin (tenants);
-
--- Add indexes on the labels column for label-based queries:
 create index public_ips_by_label on public_ips using gin (labels);
+
+-- Indexes on the archived table:
+create index archived_public_ips_by_name on archived_public_ips (name);
+create index archived_public_ips_by_owner on archived_public_ips using gin (creators);
+create index archived_public_ips_by_tenant on archived_public_ips using gin (tenants);
+create index archived_public_ips_by_label on archived_public_ips using gin (labels);
