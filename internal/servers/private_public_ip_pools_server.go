@@ -201,10 +201,14 @@ func (s *PrivatePublicIPPoolsServer) validateCreate(ctx context.Context,
 		}
 	}
 
+	if err := validateNoCIDRSelfOverlap(cidrs); err != nil {
+		return err
+	}
+
 	return s.validateNoPoolCIDROverlap(ctx, pool)
 }
 
-// validateUpdate validates a PublicIPPool update request. Only immutability of spec fields is checked 
+// validateUpdate validates a PublicIPPool update request. Only immutability of spec fields is checked
 func validateUpdate(newPool *privatev1.PublicIPPool, existing *privatev1.PublicIPPool) error {
 	if newPool == nil {
 		return grpcstatus.Errorf(grpccodes.InvalidArgument, "public IP pool is mandatory")
@@ -255,19 +259,30 @@ func validatePoolCIDRFormat(cidrStr string, ipFamily privatev1.IPFamily, idx int
 	return nil
 }
 
-// validateNoPoolCIDROverlap checks for CIDRs overlap with CIDRs from any existing pool
+// validateNoCIDRSelfOverlap checks that no two CIDRs within the same pool overlap each other.
+// This is called after format validation, so all CIDRs are known to be parseable.
+func validateNoCIDRSelfOverlap(cidrs []string) error {
+	for i := 0; i < len(cidrs); i++ {
+		for j := i + 1; j < len(cidrs); j++ {
+			overlap, err := cidrsOverlap(cidrs[i], cidrs[j])
+			if err != nil {
+				return grpcstatus.Errorf(grpccodes.Internal, "failed to check intra-pool CIDR overlap")
+			}
+			if overlap {
+				return grpcstatus.Errorf(grpccodes.InvalidArgument,
+					"field 'spec.cidrs[%d]' (%s) overlaps with 'spec.cidrs[%d]' (%s) within the same pool",
+					i, cidrs[i], j, cidrs[j])
+			}
+		}
+	}
+	return nil
+}
+
+// validateNoPoolCIDROverlap checks for CIDR overlap with CIDRs from any existing pool.
 func (s *PrivatePublicIPPoolsServer) validateNoPoolCIDROverlap(ctx context.Context,
 	pool *privatev1.PublicIPPool) error {
 
-	type parsedCIDR struct {
-		raw string
-		net *net.IPNet
-	}
-	newCIDRs := make([]parsedCIDR, 0, len(pool.GetSpec().GetCidrs()))
-	for _, cidr := range pool.GetSpec().GetCidrs() {
-		_, ipNet, _ := net.ParseCIDR(cidr)
-		newCIDRs = append(newCIDRs, parsedCIDR{raw: cidr, net: ipNet})
-	}
+	newCIDRs := pool.GetSpec().GetCidrs()
 
 	var offset int32
 	for {
@@ -280,16 +295,17 @@ func (s *PrivatePublicIPPoolsServer) validateNoPoolCIDROverlap(ctx context.Conte
 		}
 
 		for _, existing := range listResponse.GetItems() {
-			for _, existingCIDRStr := range existing.GetSpec().GetCidrs() {
-				_, existingNet, err := net.ParseCIDR(existingCIDRStr)
-				if err != nil {
-					continue
-				}
+			for _, existingCIDR := range existing.GetSpec().GetCidrs() {
 				for _, newCIDR := range newCIDRs {
-					if newCIDR.net.Contains(existingNet.IP) || existingNet.Contains(newCIDR.net.IP) {
+					overlap, err := cidrsOverlap(newCIDR, existingCIDR)
+					if err != nil {
+						s.logger.ErrorContext(ctx, "Failed to check CIDR overlap", slog.Any("error", err))
+						return grpcstatus.Errorf(grpccodes.Internal, "failed to validate CIDR overlap")
+					}
+					if overlap {
 						return grpcstatus.Errorf(grpccodes.AlreadyExists,
 							"CIDR '%s' overlaps with CIDR '%s' from existing pool '%s'",
-							newCIDR.raw, existingCIDRStr, existing.GetMetadata().GetName())
+							newCIDR, existingCIDR, existing.GetMetadata().GetName())
 					}
 				}
 			}
@@ -304,8 +320,7 @@ func (s *PrivatePublicIPPoolsServer) validateNoPoolCIDROverlap(ctx context.Conte
 	return nil
 }
 
-
-// calculatePoolCapacity returns the total number of usable IP addresses across all CIDRs in the pool 
+// calculatePoolCapacity returns the total number of usable IP addresses across all CIDRs in the pool
 func calculatePoolCapacity(cidrs []string, ipFamily privatev1.IPFamily) int64 {
 	var total int64
 	for _, cidr := range cidrs {

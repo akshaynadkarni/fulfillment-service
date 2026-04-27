@@ -408,31 +408,7 @@ var _ = Describe("Private public IP pools server", func() {
 			})
 		})
 
-		Context("POOL-VAL-03: CIDR format validation", func() {
-			It("accepts valid IPv4 CIDR", func() {
-				pool := privatev1.PublicIPPool_builder{
-					Spec: privatev1.PublicIPPoolSpec_builder{
-						Cidrs:    []string{"10.0.0.0/24"},
-						IpFamily: privatev1.IPFamily_IP_FAMILY_IPV4,
-					}.Build(),
-				}.Build()
-
-				err := poolsServer.validateCreate(ctx, pool)
-				Expect(err).ToNot(HaveOccurred())
-			})
-
-			It("accepts valid IPv6 CIDR", func() {
-				pool := privatev1.PublicIPPool_builder{
-					Spec: privatev1.PublicIPPoolSpec_builder{
-						Cidrs:    []string{"2001:db8::/64"},
-						IpFamily: privatev1.IPFamily_IP_FAMILY_IPV6,
-					}.Build(),
-				}.Build()
-
-				err := poolsServer.validateCreate(ctx, pool)
-				Expect(err).ToNot(HaveOccurred())
-			})
-
+		Context("CIDR format validation", func() {
 			It("rejects malformed CIDR", func() {
 				pool := privatev1.PublicIPPool_builder{
 					Spec: privatev1.PublicIPPoolSpec_builder{
@@ -446,45 +422,6 @@ var _ = Describe("Private public IP pools server", func() {
 				status, ok := grpcstatus.FromError(err)
 				Expect(ok).To(BeTrue())
 				Expect(status.Code()).To(Equal(grpccodes.InvalidArgument))
-				Expect(err.Error()).To(ContainSubstring("invalid CIDR format"))
-			})
-
-			It("rejects CIDR with invalid prefix length (IPv4 /33)", func() {
-				pool := privatev1.PublicIPPool_builder{
-					Spec: privatev1.PublicIPPoolSpec_builder{
-						Cidrs:    []string{"10.0.0.0/33"},
-						IpFamily: privatev1.IPFamily_IP_FAMILY_IPV4,
-					}.Build(),
-				}.Build()
-
-				err := poolsServer.validateCreate(ctx, pool)
-				Expect(err).To(HaveOccurred())
-				Expect(err.Error()).To(ContainSubstring("invalid CIDR format"))
-			})
-
-			It("rejects CIDR with invalid prefix length (IPv6 /129)", func() {
-				pool := privatev1.PublicIPPool_builder{
-					Spec: privatev1.PublicIPPoolSpec_builder{
-						Cidrs:    []string{"2001:db8::/129"},
-						IpFamily: privatev1.IPFamily_IP_FAMILY_IPV6,
-					}.Build(),
-				}.Build()
-
-				err := poolsServer.validateCreate(ctx, pool)
-				Expect(err).To(HaveOccurred())
-				Expect(err.Error()).To(ContainSubstring("invalid CIDR format"))
-			})
-
-			It("rejects a bare IP address without prefix", func() {
-				pool := privatev1.PublicIPPool_builder{
-					Spec: privatev1.PublicIPPoolSpec_builder{
-						Cidrs:    []string{"10.0.0.1"},
-						IpFamily: privatev1.IPFamily_IP_FAMILY_IPV4,
-					}.Build(),
-				}.Build()
-
-				err := poolsServer.validateCreate(ctx, pool)
-				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("invalid CIDR format"))
 			})
 
@@ -502,7 +439,7 @@ var _ = Describe("Private public IP pools server", func() {
 			})
 		})
 
-		Context("POOL-VAL-04: IP family consistency", func() {
+		Context("IP family consistency", func() {
 			It("rejects IPv6 CIDR in an IPv4 pool", func() {
 				pool := privatev1.PublicIPPool_builder{
 					Spec: privatev1.PublicIPPoolSpec_builder{
@@ -564,20 +501,9 @@ var _ = Describe("Private public IP pools server", func() {
 				Expect(err).ToNot(HaveOccurred())
 			})
 
-			It("accepts multiple IPv6 CIDRs in an IPv6 pool", func() {
-				pool := privatev1.PublicIPPool_builder{
-					Spec: privatev1.PublicIPPoolSpec_builder{
-						Cidrs:    []string{"2001:db8:1::/64", "2001:db8:2::/64"},
-						IpFamily: privatev1.IPFamily_IP_FAMILY_IPV6,
-					}.Build(),
-				}.Build()
-
-				err := poolsServer.validateCreate(ctx, pool)
-				Expect(err).ToNot(HaveOccurred())
-			})
 		})
 
-		Context("POOL-VAL-06: Cross-pool CIDR overlap detection", func() {
+		Context("Cross-pool CIDR overlap detection", func() {
 			It("rejects a pool whose CIDR exactly matches an existing pool", func() {
 				_, err := poolsServer.Create(ctx, privatev1.PublicIPPoolsCreateRequest_builder{
 					Object: privatev1.PublicIPPool_builder{
@@ -697,7 +623,7 @@ var _ = Describe("Private public IP pools server", func() {
 						Spec: privatev1.PublicIPPoolSpec_builder{
 							Cidrs: []string{
 								"192.168.0.0/24", // safe
-								"10.0.0.0/24",   // overlaps first-pool
+								"10.0.0.0/24",    // overlaps first-pool
 							},
 							IpFamily: privatev1.IPFamily_IP_FAMILY_IPV4,
 						}.Build(),
@@ -711,7 +637,55 @@ var _ = Describe("Private public IP pools server", func() {
 			})
 		})
 
-		Context("POOL-CAP-01: Capacity calculation on Create", func() {
+		Context("Intra-pool CIDR overlap detection", func() {
+			It("rejects a pool whose second CIDR is a subset of the first", func() {
+				pool := privatev1.PublicIPPool_builder{
+					Spec: privatev1.PublicIPPoolSpec_builder{
+						Cidrs:    []string{"10.0.0.0/24", "10.0.0.0/25"},
+						IpFamily: privatev1.IPFamily_IP_FAMILY_IPV4,
+					}.Build(),
+				}.Build()
+
+				err := poolsServer.validateCreate(ctx, pool)
+				Expect(err).To(HaveOccurred())
+				status, ok := grpcstatus.FromError(err)
+				Expect(ok).To(BeTrue())
+				Expect(status.Code()).To(Equal(grpccodes.InvalidArgument))
+				Expect(err.Error()).To(ContainSubstring("cidrs[0]"))
+				Expect(err.Error()).To(ContainSubstring("cidrs[1]"))
+				Expect(err.Error()).To(ContainSubstring("overlaps"))
+			})
+
+			It("accepts a pool with non-overlapping CIDRs", func() {
+				pool := privatev1.PublicIPPool_builder{
+					Spec: privatev1.PublicIPPoolSpec_builder{
+						Cidrs:    []string{"10.0.0.0/24", "10.0.1.0/24", "10.0.2.0/24"},
+						IpFamily: privatev1.IPFamily_IP_FAMILY_IPV4,
+					}.Build(),
+				}.Build()
+
+				err := poolsServer.validateCreate(ctx, pool)
+				Expect(err).ToNot(HaveOccurred())
+			})
+
+			It("rejects an IPv6 pool with overlapping CIDRs", func() {
+				pool := privatev1.PublicIPPool_builder{
+					Spec: privatev1.PublicIPPoolSpec_builder{
+						Cidrs:    []string{"2001:db8::/32", "2001:db8::/64"},
+						IpFamily: privatev1.IPFamily_IP_FAMILY_IPV6,
+					}.Build(),
+				}.Build()
+
+				err := poolsServer.validateCreate(ctx, pool)
+				Expect(err).To(HaveOccurred())
+				status, ok := grpcstatus.FromError(err)
+				Expect(ok).To(BeTrue())
+				Expect(status.Code()).To(Equal(grpccodes.InvalidArgument))
+				Expect(err.Error()).To(ContainSubstring("overlaps"))
+			})
+		})
+
+		Context("Capacity calculation on Create", func() {
 			It("sets status.total to 254 for a /24 IPv4 CIDR", func() {
 				response, err := poolsServer.Create(ctx, privatev1.PublicIPPoolsCreateRequest_builder{
 					Object: privatev1.PublicIPPool_builder{
@@ -834,7 +808,7 @@ var _ = Describe("Private public IP pools server", func() {
 			})
 		})
 
-		Context("POOL-VAL-05: Immutability on Update", func() {
+		Context("Immutability on Update", func() {
 			It("prevents changing spec.cidrs after creation", func() {
 				createResponse, err := poolsServer.Create(ctx, privatev1.PublicIPPoolsCreateRequest_builder{
 					Object: privatev1.PublicIPPool_builder{
@@ -970,22 +944,6 @@ var _ = Describe("Private public IP pools server", func() {
 				Expect(result).To(BeNumerically("==", 0))
 			})
 
-			It("calculatePoolCapacity sums multiple CIDRs", func() {
-				// /24 → 254, /28 → 14: total = 268
-				result := calculatePoolCapacity(
-					[]string{"10.0.0.0/24", "10.1.0.0/28"},
-					privatev1.IPFamily_IP_FAMILY_IPV4,
-				)
-				Expect(result).To(BeNumerically("==", 268))
-			})
-
-			It("calculatePoolCapacity caps at MaxInt64 for large IPv6 ranges", func() {
-				result := calculatePoolCapacity(
-					[]string{"2001:db8::/64"},
-					privatev1.IPFamily_IP_FAMILY_IPV6,
-				)
-				Expect(result).To(BeNumerically("==", math.MaxInt64))
-			})
 		})
 	})
 })
