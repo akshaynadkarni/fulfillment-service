@@ -156,6 +156,9 @@ func (s *PrivatePublicIPsServer) Get(ctx context.Context,
 	return
 }
 
+// Create validates the pool reference, creates the PublicIP, and updates pool capacity counters.
+// All operations share the gRPC interceptor's database transaction: if any step fails, the
+// entire transaction rolls back (pool capacity, PublicIP creation, and validation are atomic).
 func (s *PrivatePublicIPsServer) Create(ctx context.Context,
 	request *privatev1.PublicIPsCreateRequest) (response *privatev1.PublicIPsCreateResponse, err error) {
 	publicIP := request.GetObject()
@@ -179,7 +182,9 @@ func (s *PrivatePublicIPsServer) Create(ctx context.Context,
 		return
 	}
 
-	// Update pool capacity: decrement available, increment allocated:
+	// Update pool capacity: decrement available, increment allocated.
+	// Concurrent allocations are serialized by the pool's resource_version
+	// (optimistic locking). A version conflict returns Aborted for client retry.
 	err = s.updatePoolCapacity(ctx, poolID, 1)
 	if err != nil {
 		return
@@ -188,9 +193,12 @@ func (s *PrivatePublicIPsServer) Create(ctx context.Context,
 	return
 }
 
+// Update validates pool immutability and state machine transitions before persisting.
+// The Get and Update share the gRPC interceptor's transaction. GenericServer.Update uses
+// optimistic locking (resource_version), so a concurrent state change between Get and
+// Update causes a version conflict rather than a silent overwrite.
 func (s *PrivatePublicIPsServer) Update(ctx context.Context,
 	request *privatev1.PublicIPsUpdateRequest) (response *privatev1.PublicIPsUpdateResponse, err error) {
-	// Get existing object for immutability and state machine validation:
 	id := request.GetObject().GetId()
 	if id == "" {
 		err = grpcstatus.Errorf(grpccodes.InvalidArgument, "object identifier is mandatory")
@@ -225,6 +233,8 @@ func (s *PrivatePublicIPsServer) Update(ctx context.Context,
 	return
 }
 
+// Delete rejects deletion of ATTACHED PublicIPs and restores pool capacity on success.
+// All operations share the gRPC interceptor's transaction for atomicity.
 func (s *PrivatePublicIPsServer) Delete(ctx context.Context,
 	request *privatev1.PublicIPsDeleteRequest) (response *privatev1.PublicIPsDeleteResponse, err error) {
 	// Fetch the existing PublicIP to check state and get pool ID:
