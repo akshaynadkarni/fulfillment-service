@@ -93,7 +93,11 @@ var _ = BeforeSuite(func() {
 	Expect(err).ToNot(HaveOccurred())
 	logger.Info(
 		"Configuration",
-		slog.Any("values", config),
+		slog.Bool("keep_kind", config.KeepKind),
+		slog.Bool("keep_service", config.KeepService),
+		slog.String("deploy_mode", config.DeployMode),
+		slog.Bool("debug", config.Debug),
+		slog.String("!client_secret", config.ClientSecret),
 	)
 
 	// Debug mode isn't compatible with the Kustomize deployment mode:

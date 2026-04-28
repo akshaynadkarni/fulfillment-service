@@ -355,6 +355,12 @@ func (t *Tool) Setup(ctx context.Context) error {
 		return err
 	}
 
+	// Create the controller credentials:
+	err = t.createControllerCredentials(ctx)
+	if err != nil {
+		return err
+	}
+
 	// Install the service:
 	err = t.deployService(ctx, imageRef)
 	if err != nil {
@@ -733,6 +739,27 @@ func (t *Tool) createServiceDatabaseResources(ctx context.Context) error {
 	return fmt.Errorf("service database client certificate secret not available after waiting: %w", err)
 }
 
+// createControllerCredentials creates a Kubernetes secret containing the OAuth client credentials that the controller
+// uses to authenticate to the API.
+func (t *Tool) createControllerCredentials(ctx context.Context) error {
+	t.logger.DebugContext(ctx, "Creating controller API credentials secret")
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "osac",
+			Name:      controllerCredentialsSecret,
+		},
+		StringData: map[string]string{
+			"client-id":     controllerClientId,
+			"client-secret": t.clientSecret,
+		},
+	}
+	err := t.kubeClient.Create(ctx, secret)
+	if err != nil && !apierrors.IsAlreadyExists(err) {
+		return fmt.Errorf("failed to create controller credentials secret: %w", err)
+	}
+	return nil
+}
+
 // deployKeycloak installs the Keycloak chart.
 func (t *Tool) deployKeycloak(ctx context.Context) error {
 	// Get the host name:
@@ -1083,6 +1110,23 @@ func (t *Tool) deployServiceWithHelm(ctx context.Context, imageRef string) error
 		},
 		"auth": map[string]any{
 			"issuerUrl": fmt.Sprintf("https://%s/realms/osac", keycloakAddr),
+			"controllerCredentials": []any{
+				map[string]any{
+					"secret": map[string]any{
+						"name": controllerCredentialsSecret,
+						"items": []any{
+							map[string]any{
+								"key":   "client-id",
+								"param": "client-id",
+							},
+							map[string]any{
+								"key":   "client-secret",
+								"param": "client-secret",
+							},
+						},
+					},
+				},
+			},
 		},
 		"database": map[string]any{
 			"connection": []any{
@@ -1814,6 +1858,10 @@ const (
 	serviceDatabaseClientCertSecret  = "fulfillment-database-client-cert"
 	serviceDatabaseConfigMap         = "fulfillment-database-config"
 )
+
+// Name of the Kubernetes secret that contains the OAuth client credentials that the controller uses to authenticate to
+// the API.
+const controllerCredentialsSecret = "fulfillment-controller-credentials"
 
 // Name of the Kubernetes service account that is used for emergency administration access.
 const emergencyServiceAccount = "admin"
