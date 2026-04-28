@@ -202,9 +202,11 @@ details about the available fields for clients.
 When using this Keycloak chart together with the fulfillment service, you must create at least the
 following two service account clients:
 
-- `osac-admin` — Used by the administrator tooling to manage the service.
-- `osac-controller` — Used by the controller to authenticate to the fulfillment API using the OAuth
-  client credentials flow.
+- `osac-admin` - Used by the administrator tooling to manage the service.
+
+- `osac-controller` - Used by the controller to authenticate to the fulfillment API using the OAuth
+  client credentials flow. This service account requires the `manage-users` role from the
+  `realm-management` client so that the controller can manage Keycloak users.
 
 For example:
 
@@ -248,6 +250,9 @@ users:
 - username: service-account-osac-controller
   enabled: true
   serviceAccountClientId: osac-controller
+  clientRoles:
+    realm-management:
+    - manage-users
 ```
 
 The `secret` values used here must match the credentials configured in the fulfillment service Helm
@@ -266,7 +271,7 @@ following steps:
     $ pod=$(kubectl get pods -n keycloak -l app=keycloak-service -o json | jq -r '.items[].metadata.name')
     ```
 
-2. Run the `export` command inside the pod to write the ream to a temporary file:
+2. Run the `export` command inside the pod to write the realm to a temporary file:
 
     ```bash
     $ kubectl exec -n keycloak "${pod}" -- /opt/keycloak/bin/kc.sh export --realm osac --file /tmp/realm.json
@@ -278,8 +283,7 @@ following steps:
     $ kubectl exec -n keycloak "${pod}" -- cat /tmp/realm.json > realm.json
     ```
 
-4. Optionally, if you want to replace the realm used by the chart, overwrite the
-   `realm.json` file:
+4. Optionally, if you want to replace the realm used by the chart, overwrite the `realm.json` file:
 
    ```bash
    $ cp realm.json charts/keycloak/files/realm.json
