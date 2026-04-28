@@ -25,7 +25,17 @@ import (
 	privatev1 "github.com/osac-project/fulfillment-service/internal/api/osac/private/v1"
 	"github.com/osac-project/fulfillment-service/internal/auth"
 	"github.com/osac-project/fulfillment-service/internal/database"
+	"github.com/osac-project/fulfillment-service/internal/database/dao"
 )
+
+// validPublicIPTransitions defines the allowed state transitions for PublicIP resources.
+// The key is the current state and the value is the list of valid target states.
+var validPublicIPTransitions = map[privatev1.PublicIPState][]privatev1.PublicIPState{
+	privatev1.PublicIPState_PUBLIC_IP_STATE_PENDING:   {privatev1.PublicIPState_PUBLIC_IP_STATE_ALLOCATED},
+	privatev1.PublicIPState_PUBLIC_IP_STATE_ALLOCATED: {privatev1.PublicIPState_PUBLIC_IP_STATE_ATTACHED},
+	privatev1.PublicIPState_PUBLIC_IP_STATE_ATTACHED:  {privatev1.PublicIPState_PUBLIC_IP_STATE_RELEASING},
+	privatev1.PublicIPState_PUBLIC_IP_STATE_RELEASING: {privatev1.PublicIPState_PUBLIC_IP_STATE_ALLOCATED},
+}
 
 // PrivatePublicIPsServerBuilder contains the data and logic needed to create a PrivatePublicIPsServer.
 type PrivatePublicIPsServerBuilder struct {
@@ -39,12 +49,14 @@ type PrivatePublicIPsServerBuilder struct {
 var _ privatev1.PublicIPsServer = (*PrivatePublicIPsServer)(nil)
 
 // PrivatePublicIPsServer implements the private PublicIPs gRPC service. It delegates most operations to a
-// GenericServer and adds pool-required validation on Create.
+// GenericServer and adds pool validation on Create, state machine enforcement on Update, and delete
+// constraints.
 type PrivatePublicIPsServer struct {
 	privatev1.UnimplementedPublicIPsServer
 
-	logger  *slog.Logger
-	generic *GenericServer[*privatev1.PublicIP]
+	logger           *slog.Logger
+	generic          *GenericServer[*privatev1.PublicIP]
+	publicIPPoolDao  *dao.GenericDAO[*privatev1.PublicIPPool]
 }
 
 // NewPrivatePublicIPsServer creates a builder that can then be used to configure and create a PrivatePublicIPsServer.
@@ -99,6 +111,16 @@ func (b *PrivatePublicIPsServerBuilder) Build() (result *PrivatePublicIPsServer,
 		return
 	}
 
+	// Create the PublicIPPool DAO for pool validation and capacity tracking:
+	publicIPPoolDao, err := dao.NewGenericDAO[*privatev1.PublicIPPool]().
+		SetLogger(b.logger).
+		SetTenancyLogic(b.tenancyLogic).
+		SetMetricsRegisterer(b.metricsRegisterer).
+		Build()
+	if err != nil {
+		return
+	}
+
 	// Create the generic server:
 	generic, err := NewGenericServer[*privatev1.PublicIP]().
 		SetLogger(b.logger).
@@ -114,8 +136,9 @@ func (b *PrivatePublicIPsServerBuilder) Build() (result *PrivatePublicIPsServer,
 
 	// Create and populate the object:
 	result = &PrivatePublicIPsServer{
-		logger:  b.logger,
-		generic: generic,
+		logger:          b.logger,
+		generic:         generic,
+		publicIPPoolDao: publicIPPoolDao,
 	}
 	return
 }
@@ -142,19 +165,106 @@ func (s *PrivatePublicIPsServer) Create(ctx context.Context,
 		return
 	}
 
+	// Validate pool reference (existence, READY state, capacity):
+	poolID := publicIP.GetSpec().GetPool()
+	err = s.validatePoolReference(ctx, poolID)
+	if err != nil {
+		return
+	}
+
+	// Create the PublicIP:
 	err = s.generic.Create(ctx, request, &response)
+	if err != nil {
+		return
+	}
+
+	// Update pool capacity: decrement available, increment allocated:
+	err = s.updatePoolCapacity(ctx, poolID, 1)
+	if err != nil {
+		return
+	}
+
 	return
 }
 
 func (s *PrivatePublicIPsServer) Update(ctx context.Context,
 	request *privatev1.PublicIPsUpdateRequest) (response *privatev1.PublicIPsUpdateResponse, err error) {
+	// Get existing object for immutability and state machine validation:
+	id := request.GetObject().GetId()
+	if id == "" {
+		err = grpcstatus.Errorf(grpccodes.InvalidArgument, "object identifier is mandatory")
+		return
+	}
+
+	getRequest := &privatev1.PublicIPsGetRequest{}
+	getRequest.SetId(id)
+	var getResponse *privatev1.PublicIPsGetResponse
+	err = s.generic.Get(ctx, getRequest, &getResponse)
+	if err != nil {
+		return
+	}
+
+	existingPublicIP := getResponse.GetObject()
+
+	// Check pool immutability:
+	if err = validateImmutableFieldsPublicIP(request.GetObject(), existingPublicIP); err != nil {
+		return
+	}
+
+	// Check state machine transitions:
+	newState := request.GetObject().GetStatus().GetState()
+	existingState := existingPublicIP.GetStatus().GetState()
+	if newState != privatev1.PublicIPState_PUBLIC_IP_STATE_UNSPECIFIED && newState != existingState {
+		if err = validatePublicIPStateTransition(existingState, newState); err != nil {
+			return
+		}
+	}
+
 	err = s.generic.Update(ctx, request, &response)
 	return
 }
 
 func (s *PrivatePublicIPsServer) Delete(ctx context.Context,
 	request *privatev1.PublicIPsDeleteRequest) (response *privatev1.PublicIPsDeleteResponse, err error) {
+	// Fetch the existing PublicIP to check state and get pool ID:
+	id := request.GetId()
+	if id == "" {
+		err = grpcstatus.Errorf(grpccodes.InvalidArgument, "object identifier is mandatory")
+		return
+	}
+
+	getRequest := &privatev1.PublicIPsGetRequest{}
+	getRequest.SetId(id)
+	var getResponse *privatev1.PublicIPsGetResponse
+	err = s.generic.Get(ctx, getRequest, &getResponse)
+	if err != nil {
+		return
+	}
+
+	existingPublicIP := getResponse.GetObject()
+
+	// Reject delete when in ATTACHED state:
+	if existingPublicIP.GetStatus().GetState() == privatev1.PublicIPState_PUBLIC_IP_STATE_ATTACHED {
+		err = grpcstatus.Errorf(grpccodes.FailedPrecondition,
+			"cannot delete PublicIP: detach from ComputeInstance first")
+		return
+	}
+
+	// Delete the PublicIP:
 	err = s.generic.Delete(ctx, request, &response)
+	if err != nil {
+		return
+	}
+
+	// Update pool capacity: increment available, decrement allocated:
+	poolID := existingPublicIP.GetSpec().GetPool()
+	if poolID != "" {
+		err = s.updatePoolCapacity(ctx, poolID, -1)
+		if err != nil {
+			return
+		}
+	}
+
 	return
 }
 
@@ -179,4 +289,109 @@ func (s *PrivatePublicIPsServer) validatePublicIP(ctx context.Context,
 			"field 'spec.pool' is required")
 	}
 	return nil
+}
+
+// validatePoolReference validates that the referenced PublicIPPool exists, is in READY state,
+// and has available capacity.
+func (s *PrivatePublicIPsServer) validatePoolReference(ctx context.Context, poolID string) error {
+	getResponse, err := s.publicIPPoolDao.Get().
+		SetId(poolID).
+		Do(ctx)
+	if err != nil {
+		var notFoundErr *dao.ErrNotFound
+		if errors.As(err, &notFoundErr) {
+			return grpcstatus.Errorf(grpccodes.InvalidArgument,
+				"pool '%s' does not exist", poolID)
+		}
+		s.logger.ErrorContext(ctx, "Failed to query PublicIPPool",
+			slog.String("pool_id", poolID),
+			slog.Any("error", err))
+		return grpcstatus.Errorf(grpccodes.Internal, "failed to validate pool")
+	}
+
+	pool := getResponse.GetObject()
+
+	// Check pool is in READY state:
+	if pool.GetStatus().GetState() != privatev1.PublicIPPoolState_PUBLIC_IP_POOL_STATE_READY {
+		return grpcstatus.Errorf(grpccodes.FailedPrecondition,
+			"pool '%s' is not in READY state (current state: %s)",
+			poolID, pool.GetStatus().GetState().String())
+	}
+
+	// Check pool has available capacity:
+	if pool.GetStatus().GetAvailable() <= 0 {
+		return grpcstatus.Errorf(grpccodes.FailedPrecondition,
+			"pool '%s' has no available capacity", poolID)
+	}
+
+	return nil
+}
+
+// updatePoolCapacity atomically updates the PublicIPPool capacity counters.
+// A positive delta means allocation (increment allocated, decrement available).
+// A negative delta means release (decrement allocated, increment available).
+func (s *PrivatePublicIPsServer) updatePoolCapacity(ctx context.Context, poolID string, delta int64) error {
+	poolResponse, err := s.publicIPPoolDao.Get().
+		SetId(poolID).
+		Do(ctx)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "Failed to get pool for capacity update",
+			slog.String("pool_id", poolID),
+			slog.Any("error", err))
+		return grpcstatus.Errorf(grpccodes.Internal, "failed to update pool capacity")
+	}
+
+	pool := poolResponse.GetObject()
+	pool.GetStatus().SetAllocated(pool.GetStatus().GetAllocated() + delta)
+	pool.GetStatus().SetAvailable(pool.GetStatus().GetAvailable() - delta)
+
+	_, err = s.publicIPPoolDao.Update().
+		SetObject(pool).
+		Do(ctx)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "Failed to update pool capacity",
+			slog.String("pool_id", poolID),
+			slog.Any("error", err))
+		return grpcstatus.Errorf(grpccodes.Aborted, "pool capacity update conflict, retry")
+	}
+
+	return nil
+}
+
+// validateImmutableFieldsPublicIP validates that immutable fields have not been changed on Update.
+func validateImmutableFieldsPublicIP(newPublicIP, existingPublicIP *privatev1.PublicIP) error {
+	if existingPublicIP == nil {
+		return nil // Create operation, no immutability checks
+	}
+
+	newPool := newPublicIP.GetSpec().GetPool()
+	existingPool := existingPublicIP.GetSpec().GetPool()
+
+	// Only check if the request explicitly sets a pool value that differs from the existing one:
+	if newPool != "" && newPool != existingPool {
+		return grpcstatus.Errorf(grpccodes.InvalidArgument,
+			"field 'spec.pool' is immutable and cannot be changed from '%s' to '%s'",
+			existingPool, newPool)
+	}
+
+	return nil
+}
+
+// validatePublicIPStateTransition checks whether a state transition is valid according to the
+// PublicIP lifecycle state machine.
+func validatePublicIPStateTransition(from, to privatev1.PublicIPState) error {
+	allowed, exists := validPublicIPTransitions[from]
+	if !exists {
+		return grpcstatus.Errorf(grpccodes.FailedPrecondition,
+			"invalid state transition from %s to %s", from.String(), to.String())
+	}
+
+	for _, valid := range allowed {
+		if to == valid {
+			return nil
+		}
+	}
+
+	return grpcstatus.Errorf(grpccodes.FailedPrecondition,
+		"invalid state transition from %s to %s", from.String(), to.String())
 }
