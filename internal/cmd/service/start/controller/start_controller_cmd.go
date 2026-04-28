@@ -309,8 +309,12 @@ func (r *runnerContext) run(cmd *cobra.Command, argv []string) error {
 
 	// Create scheme for typed OSAC CRD access on hub clusters:
 	hubScheme := runtime.NewScheme()
-	_ = osacv1alpha1.AddToScheme(hubScheme)
-	_ = corev1.AddToScheme(hubScheme)
+	if err = osacv1alpha1.AddToScheme(hubScheme); err != nil {
+		return fmt.Errorf("failed to register OSAC API types in hub scheme: %w", err)
+	}
+	if err = corev1.AddToScheme(hubScheme); err != nil {
+		return fmt.Errorf("failed to register core API types in hub scheme: %w", err)
+	}
 
 	// Create the hub cache:
 	r.logger.InfoContext(ctx, "Creating hub cache")
