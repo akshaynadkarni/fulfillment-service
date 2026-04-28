@@ -958,7 +958,10 @@ func (t *Tool) deployKeycloak(ctx context.Context) error {
 		ClientId:    controllerClientId,
 		ClientRoles: map[string][]string{
 			"realm-management": {
+				"manage-realm",
 				"manage-users",
+				"view-realm",
+				"view-users",
 			},
 		},
 	})

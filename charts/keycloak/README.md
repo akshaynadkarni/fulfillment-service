@@ -205,8 +205,13 @@ following two service account clients:
 - `osac-admin` - Used by the administrator tooling to manage the service.
 
 - `osac-controller` - Used by the controller to authenticate to the fulfillment API using the OAuth
-  client credentials flow. This service account requires the `manage-users` role from the
-  `realm-management` client so that the controller can manage Keycloak users.
+  client credentials flow. This service account requires the following roles from the
+  `realm-management` client:
+
+  - `manage-realm` - Manage the realm configuration, including organizations.
+  - `manage-users` - Create, update and delete users.
+  - `view-realm` - View the realm configuration.
+  - `view-users` - View users.
 
 For example:
 
@@ -252,7 +257,10 @@ users:
   serviceAccountClientId: osac-controller
   clientRoles:
     realm-management:
+    - manage-realm
     - manage-users
+    - view-realm
+    - view-users
 ```
 
 The `secret` values used here must match the credentials configured in the fulfillment service Helm
