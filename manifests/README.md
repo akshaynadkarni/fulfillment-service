@@ -15,7 +15,8 @@ patch in a custom overlay.
 
 Before deploying the service you need to create a Kubernetes secret containing the OAuth client
 credentials that the controller uses to authenticate to the API. The client identifier and secret
-must match the `osac-controller` service account configured in the identity provider.
+must match the `osac-controller` service account configured in the identity provider. That service
+account must also have the `manage-users` role from the `realm-management` client.
 
 The secret must be named `fulfillment-controller-credentials` and contain the keys `client-id` and
 `client-secret`:

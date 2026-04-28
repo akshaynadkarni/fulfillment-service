@@ -917,6 +917,7 @@ func (t *Tool) deployKeycloak(ctx context.Context) error {
 		Name        string
 		Description string
 		ClientId    string
+		ClientRoles map[string][]string
 	}
 	addServiceAccount := func(data serviceAccountData) {
 		clients = append(
@@ -942,6 +943,7 @@ func (t *Tool) deployKeycloak(ctx context.Context) error {
 				"username":               fmt.Sprintf("service-account-%s", data.ClientId),
 				"enabled":                true,
 				"serviceAccountClientId": data.ClientId,
+				"clientRoles":            data.ClientRoles,
 			},
 		)
 	}
@@ -954,6 +956,11 @@ func (t *Tool) deployKeycloak(ctx context.Context) error {
 		Name:        "OSAC controller",
 		Description: "Service account for the OSAC controller",
 		ClientId:    controllerClientId,
+		ClientRoles: map[string][]string{
+			"realm-management": {
+				"manage-users",
+			},
+		},
 	})
 
 	// Add the prepared clients, groups and users to the values:

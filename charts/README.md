@@ -14,10 +14,12 @@ installed separately before deploying the service:
   details are passed to the chart via the `database.connection` value. See the
   `charts/service/values.yaml` file for details.
 
-- _Keycloak_ - The service requires Keycloak issuer for authentication. The issuer URL is passed
+- _Keycloak_ - The service requires a Keycloak issuer for authentication. The issuer URL is passed
   via `auth.issuerUrl`. You must create at least the `osac-admin` and `osac-controller` service
-  account clients and pass the credentials via the `auth.controllerCredentials` value. See the
-  `charts/service/values.yaml` file for the expected format.
+  account clients and pass the credentials via the `auth.controllerCredentials` value. The
+  `osac-controller` service account also needs the `manage-users` role from the `realm-management`
+  client. See the `charts/service/values.yaml` file for the expected format and the
+  `charts/keycloak/README.md` file for details on the required Keycloak configuration.
 
 Note that the PostgreSQL and Keycloak Helm charts that are included in this project are intended
 only for development environments, and shouldn't be used in production.
@@ -110,7 +112,8 @@ $ kubectl create secret generic fulfillment-database \
 ```
 
 Create the Kubernetes Secret containing the controller OAuth client credentials. The client
-identifier and secret must match the `osac-controller` service account created in Keycloak:
+identifier and secret must match the `osac-controller` service account created in Keycloak. That
+service account must also have the `manage-users` role from the `realm-management` client:
 
 ```shell
 $ kubectl create secret generic fulfillment-controller-credentials \
@@ -309,7 +312,8 @@ $ kubectl create secret generic fulfillment-database \
 ```
 
 Create the Kubernetes secret containing the controller OAuth client credentials. The client
-identifier and secret must match the `osac-controller` service account created in Keycloak:
+identifier and secret must match the `osac-controller` service account created in Keycloak. That
+service account must also have the `manage-users` role from the `realm-management` client:
 
 ```shell
 $ kubectl create secret generic fulfillment-controller-credentials \

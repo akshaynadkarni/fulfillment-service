@@ -202,9 +202,11 @@ details about the available fields for clients.
 When using this Keycloak chart together with the fulfillment service, you must create at least the
 following two service account clients:
 
-- `osac-admin` — Used by the administrator tooling to manage the service.
-- `osac-controller` — Used by the controller to authenticate to the fulfillment API using the OAuth
-  client credentials flow.
+- `osac-admin` - Used by the administrator tooling to manage the service.
+
+- `osac-controller` - Used by the controller to authenticate to the fulfillment API using the OAuth
+  client credentials flow. This service account requires the `manage-users` role from the
+  `realm-management` client so that the controller can manage Keycloak users.
 
 For example:
 
@@ -248,6 +250,9 @@ users:
 - username: service-account-osac-controller
   enabled: true
   serviceAccountClientId: osac-controller
+  clientRoles:
+    realm-management:
+    - manage-users
 ```
 
 The `secret` values used here must match the credentials configured in the fulfillment service Helm
