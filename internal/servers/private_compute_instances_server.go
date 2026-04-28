@@ -19,9 +19,14 @@ import (
 	"log/slog"
 	"strings"
 
+	"maps"
+
 	"github.com/prometheus/client_golang/prometheus"
+
 	grpccodes "google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	privatev1 "github.com/osac-project/fulfillment-service/internal/api/osac/private/v1"
@@ -194,11 +199,9 @@ func (s *PrivateComputeInstancesServer) Update(ctx context.Context,
 			return
 		}
 	}
-	if hasMaskPrefix(mask, "spec.template", "spec.template_parameters") {
-		_, err = s.fetchAndValidateTemplate(ctx, request.GetObject())
-		if err != nil {
-			return
-		}
+	err = s.validateTemplateImmutability(ctx, request)
+	if err != nil {
+		return
 	}
 
 	err = s.generic.Update(ctx, request, &response)
@@ -298,6 +301,60 @@ func (s *PrivateComputeInstancesServer) applySpecDefaults(
 ) error {
 	utils.ApplySpecDefaults(spec, template.GetSpecDefaults())
 	return utils.ValidateRequiredSpecFields(spec)
+}
+
+// validateTemplateImmutability ensures that the template and template_parameters fields
+// cannot be changed after compute instance creation.
+func (s *PrivateComputeInstancesServer) validateTemplateImmutability(ctx context.Context,
+	request *privatev1.ComputeInstancesUpdateRequest) error {
+	updateMask := request.GetUpdateMask()
+	updatingTemplate := hasMaskPrefix(updateMask, "spec.template")
+	updatingTemplateParams := hasMaskPrefix(updateMask, "spec.template_parameters")
+
+	if !updatingTemplate && !updatingTemplateParams {
+		return nil
+	}
+
+	ci := request.GetObject()
+	if ci == nil {
+		return grpcstatus.Errorf(grpccodes.InvalidArgument, "compute instance is mandatory")
+	}
+	id := ci.GetId()
+	if id == "" {
+		return grpcstatus.Errorf(grpccodes.InvalidArgument, "compute instance id is mandatory")
+	}
+
+	getResponse, err := s.generic.dao.Get().SetId(id).Do(ctx)
+	if err != nil {
+		return err
+	}
+	existingCI := getResponse.GetObject()
+
+	existingSpec := existingCI.GetSpec()
+	newSpec := request.GetObject().GetSpec()
+
+	if updatingTemplate && existingSpec.GetTemplate() != newSpec.GetTemplate() {
+		return grpcstatus.Errorf(
+			grpccodes.InvalidArgument,
+			"cannot change spec.template from '%s' to '%s': template is immutable",
+			existingSpec.GetTemplate(),
+			newSpec.GetTemplate(),
+		)
+	}
+
+	if updatingTemplateParams {
+		templateParamsEqual := func(first, second *anypb.Any) bool {
+			return proto.Equal(first, second)
+		}
+		if !maps.EqualFunc(existingSpec.GetTemplateParameters(), newSpec.GetTemplateParameters(), templateParamsEqual) {
+			return grpcstatus.Errorf(
+				grpccodes.InvalidArgument,
+				"cannot change spec.template_parameters: template parameters are immutable",
+			)
+		}
+	}
+
+	return nil
 }
 
 func hasMaskPrefix(mask *fieldmaskpb.FieldMask, prefixes ...string) bool {
