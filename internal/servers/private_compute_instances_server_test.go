@@ -281,6 +281,18 @@ var _ = Describe("Private compute instances server", func() {
 						Default:     memoryDefault,
 					},
 				},
+				SpecDefaults: privatev1.ComputeInstanceTemplateSpecDefaults_builder{
+					Cores:     proto.Int32(2),
+					MemoryGib: proto.Int32(2),
+					Image: privatev1.ComputeInstanceImage_builder{
+						SourceType: "registry",
+						SourceRef:  "quay.io/containerdisks/fedora:latest",
+					}.Build(),
+					BootDisk: privatev1.ComputeInstanceDisk_builder{
+						SizeGib: 10,
+					}.Build(),
+					RunStrategy: proto.String("Always"),
+				}.Build(),
 			}.Build()
 
 			_, err = templatesDao.Create().SetObject(template).Do(ctx)
@@ -445,9 +457,8 @@ var _ = Describe("Private compute instances server", func() {
 		})
 
 		It("Updates object", func() {
-			// Create templates first
+			// Create a template first
 			createTemplate("general.small")
-			createTemplate("general.large")
 
 			// Create an object:
 			createResponse, err := server.Create(ctx, privatev1.ComputeInstancesCreateRequest_builder{
@@ -467,19 +478,16 @@ var _ = Describe("Private compute instances server", func() {
 			id := createdObject.GetId()
 			Expect(id).ToNot(BeEmpty())
 
-			// Update the object:
+			// Update the object (only status, template is immutable):
 			updateResponse, err := server.Update(ctx, privatev1.ComputeInstancesUpdateRequest_builder{
 				Object: privatev1.ComputeInstance_builder{
 					Id: id,
-					Spec: privatev1.ComputeInstanceSpec_builder{
-						Template: "general.large",
-					}.Build(),
 					Status: privatev1.ComputeInstanceStatus_builder{
 						State: privatev1.ComputeInstanceState_COMPUTE_INSTANCE_STATE_RUNNING,
 					}.Build(),
 				}.Build(),
 				UpdateMask: &fieldmaskpb.FieldMask{
-					Paths: []string{"spec.template", "status.state"},
+					Paths: []string{"status.state"},
 				},
 			}.Build())
 			Expect(err).ToNot(HaveOccurred())
@@ -487,7 +495,7 @@ var _ = Describe("Private compute instances server", func() {
 			object := updateResponse.GetObject()
 			Expect(object).ToNot(BeNil())
 			Expect(object.GetId()).To(Equal(id))
-			Expect(object.GetSpec().GetTemplate()).To(Equal("general.large"))
+			Expect(object.GetSpec().GetTemplate()).To(Equal("general.small"))
 			Expect(object.GetStatus().GetState()).To(Equal(privatev1.ComputeInstanceState_COMPUTE_INSTANCE_STATE_RUNNING))
 		})
 
@@ -581,8 +589,7 @@ var _ = Describe("Private compute instances server", func() {
 			Expect(response).To(BeNil())
 		})
 
-		It("Validates template exists on update", func() {
-			// Create a template and compute instance first:
+		It("Rejects changing template on update", func() {
 			createTemplate("existing-template")
 
 			createResponse, err := server.Create(ctx, privatev1.ComputeInstancesCreateRequest_builder{
@@ -600,15 +607,12 @@ var _ = Describe("Private compute instances server", func() {
 
 			id := createResponse.GetObject().GetId()
 
-			// Try to update with non-existent template:
+			// Try to change the template:
 			updateResponse, err := server.Update(ctx, privatev1.ComputeInstancesUpdateRequest_builder{
 				Object: privatev1.ComputeInstance_builder{
 					Id: id,
 					Spec: privatev1.ComputeInstanceSpec_builder{
-						Template: "non-existent-template",
-					}.Build(),
-					Status: privatev1.ComputeInstanceStatus_builder{
-						State: privatev1.ComputeInstanceState_COMPUTE_INSTANCE_STATE_STARTING,
+						Template: "different-template",
 					}.Build(),
 				}.Build(),
 				UpdateMask: &fieldmaskpb.FieldMask{
@@ -617,6 +621,93 @@ var _ = Describe("Private compute instances server", func() {
 			}.Build())
 			Expect(err).To(HaveOccurred())
 			Expect(updateResponse).To(BeNil())
+			status, ok := grpcstatus.FromError(err)
+			Expect(ok).To(BeTrue())
+			Expect(status.Code()).To(Equal(grpccodes.InvalidArgument))
+			Expect(status.Message()).To(ContainSubstring("template is immutable"))
+		})
+
+		It("Rejects changing template_parameters on update", func() {
+			createTemplate("params-template")
+
+			// Create with initial parameters:
+			cpuParam, err := anypb.New(wrapperspb.Int32(2))
+			Expect(err).ToNot(HaveOccurred())
+
+			createResponse, err := server.Create(ctx, privatev1.ComputeInstancesCreateRequest_builder{
+				Object: privatev1.ComputeInstance_builder{
+					Spec: privatev1.ComputeInstanceSpec_builder{
+						Template:           "params-template",
+						TemplateParameters: map[string]*anypb.Any{"cpu_count": cpuParam},
+					}.Build(),
+				}.Build(),
+			}.Build())
+			Expect(err).ToNot(HaveOccurred())
+			Expect(createResponse).ToNot(BeNil())
+
+			id := createResponse.GetObject().GetId()
+
+			// Try to change template_parameters:
+			newCpuParam, err := anypb.New(wrapperspb.Int32(8))
+			Expect(err).ToNot(HaveOccurred())
+
+			updateResponse, err := server.Update(ctx, privatev1.ComputeInstancesUpdateRequest_builder{
+				Object: privatev1.ComputeInstance_builder{
+					Id: id,
+					Spec: privatev1.ComputeInstanceSpec_builder{
+						Template:           "params-template",
+						TemplateParameters: map[string]*anypb.Any{"cpu_count": newCpuParam},
+					}.Build(),
+				}.Build(),
+				UpdateMask: &fieldmaskpb.FieldMask{
+					Paths: []string{"spec.template_parameters"},
+				},
+			}.Build())
+			Expect(err).To(HaveOccurred())
+			Expect(updateResponse).To(BeNil())
+			status, ok := grpcstatus.FromError(err)
+			Expect(ok).To(BeTrue())
+			Expect(status.Code()).To(Equal(grpccodes.InvalidArgument))
+			Expect(status.Message()).To(ContainSubstring("template parameters are immutable"))
+		})
+
+		It("Allows update when template in mask but unchanged", func() {
+			createTemplate("same-template")
+
+			createResponse, err := server.Create(ctx, privatev1.ComputeInstancesCreateRequest_builder{
+				Object: privatev1.ComputeInstance_builder{
+					Spec: privatev1.ComputeInstanceSpec_builder{
+						Template: "same-template",
+					}.Build(),
+					Status: privatev1.ComputeInstanceStatus_builder{
+						State: privatev1.ComputeInstanceState_COMPUTE_INSTANCE_STATE_STARTING,
+					}.Build(),
+				}.Build(),
+			}.Build())
+			Expect(err).ToNot(HaveOccurred())
+			Expect(createResponse).ToNot(BeNil())
+
+			id := createResponse.GetObject().GetId()
+
+			// Update with template in mask but same value:
+			updateResponse, err := server.Update(ctx, privatev1.ComputeInstancesUpdateRequest_builder{
+				Object: privatev1.ComputeInstance_builder{
+					Id: id,
+					Spec: privatev1.ComputeInstanceSpec_builder{
+						Template: "same-template",
+					}.Build(),
+					Status: privatev1.ComputeInstanceStatus_builder{
+						State: privatev1.ComputeInstanceState_COMPUTE_INSTANCE_STATE_RUNNING,
+					}.Build(),
+				}.Build(),
+				UpdateMask: &fieldmaskpb.FieldMask{
+					Paths: []string{"spec.template", "status.state"},
+				},
+			}.Build())
+			Expect(err).ToNot(HaveOccurred())
+			Expect(updateResponse).ToNot(BeNil())
+			Expect(updateResponse.GetObject().GetSpec().GetTemplate()).To(Equal("same-template"))
+			Expect(updateResponse.GetObject().GetStatus().GetState()).To(Equal(privatev1.ComputeInstanceState_COMPUTE_INSTANCE_STATE_RUNNING))
 		})
 
 		It("Validates template ID is not empty", func() {
@@ -633,6 +724,195 @@ var _ = Describe("Private compute instances server", func() {
 			}.Build())
 			Expect(err).To(HaveOccurred())
 			Expect(response).To(BeNil())
+		})
+
+		It("Applies template spec defaults when user omits spec fields", func() {
+			createTemplate("defaults-template")
+
+			// Create a compute instance without any spec fields — validation should pass
+			// because template defaults cover all required fields.
+			response, err := server.Create(ctx, privatev1.ComputeInstancesCreateRequest_builder{
+				Object: privatev1.ComputeInstance_builder{
+					Spec: privatev1.ComputeInstanceSpec_builder{
+						Template: "defaults-template",
+					}.Build(),
+				}.Build(),
+			}.Build())
+			Expect(err).ToNot(HaveOccurred())
+			Expect(response).ToNot(BeNil())
+
+			spec := response.GetObject().GetSpec()
+			// Template defaults should be stored:
+			Expect(spec.GetCores()).To(Equal(int32(2)))
+			Expect(spec.GetMemoryGib()).To(Equal(int32(2)))
+			Expect(spec.GetRunStrategy()).To(Equal("Always"))
+			Expect(spec.GetImage().GetSourceType()).To(Equal("registry"))
+			Expect(spec.GetImage().GetSourceRef()).To(Equal("quay.io/containerdisks/fedora:latest"))
+			Expect(spec.GetBootDisk().GetSizeGib()).To(Equal(int32(10)))
+			// Template reference should be preserved:
+			Expect(spec.GetTemplate()).To(Equal("defaults-template"))
+		})
+
+		It("User-provided spec fields override template defaults", func() {
+			createTemplate("override-template")
+
+			// Create with user-provided cores and memory:
+			response, err := server.Create(ctx, privatev1.ComputeInstancesCreateRequest_builder{
+				Object: privatev1.ComputeInstance_builder{
+					Spec: privatev1.ComputeInstanceSpec_builder{
+						Template:    "override-template",
+						Cores:       proto.Int32(8),
+						MemoryGib:   proto.Int32(16),
+						RunStrategy: proto.String("Halted"),
+					}.Build(),
+				}.Build(),
+			}.Build())
+			Expect(err).ToNot(HaveOccurred())
+			Expect(response).ToNot(BeNil())
+
+			spec := response.GetObject().GetSpec()
+			// User-provided values should be stored:
+			Expect(spec.GetCores()).To(Equal(int32(8)))
+			Expect(spec.GetMemoryGib()).To(Equal(int32(16)))
+			Expect(spec.GetRunStrategy()).To(Equal("Halted"))
+			// Template defaults should be stored:
+			Expect(spec.GetImage().GetSourceType()).To(Equal("registry"))
+			Expect(spec.GetImage().GetSourceRef()).To(Equal("quay.io/containerdisks/fedora:latest"))
+			Expect(spec.GetBootDisk().GetSizeGib()).To(Equal(int32(10)))
+		})
+
+		It("Rejects creation when required spec fields are missing", func() {
+			// Create a template WITHOUT spec defaults:
+			templatesDao, err := dao.NewGenericDAO[*privatev1.ComputeInstanceTemplate]().
+				SetLogger(logger).
+				SetTenancyLogic(tenancy).
+				Build()
+			Expect(err).ToNot(HaveOccurred())
+
+			template := privatev1.ComputeInstanceTemplate_builder{
+				Id:          "no-defaults-template",
+				Title:       "No Defaults Template",
+				Description: "Template without spec defaults",
+				Metadata: privatev1.Metadata_builder{
+					Tenants: []string{"shared"},
+				}.Build(),
+			}.Build()
+			_, err = templatesDao.Create().SetObject(template).Do(ctx)
+			Expect(err).ToNot(HaveOccurred())
+
+			// Create a compute instance without user-provided spec fields:
+			response, err := server.Create(ctx, privatev1.ComputeInstancesCreateRequest_builder{
+				Object: privatev1.ComputeInstance_builder{
+					Spec: privatev1.ComputeInstanceSpec_builder{
+						Template: "no-defaults-template",
+					}.Build(),
+				}.Build(),
+			}.Build())
+			Expect(err).To(HaveOccurred())
+			Expect(response).To(BeNil())
+
+			status, ok := grpcstatus.FromError(err)
+			Expect(ok).To(BeTrue())
+			Expect(status.Code()).To(Equal(grpccodes.InvalidArgument))
+			Expect(status.Message()).To(ContainSubstring("boot_disk"))
+			Expect(status.Message()).To(ContainSubstring("cores"))
+			Expect(status.Message()).To(ContainSubstring("image"))
+			Expect(status.Message()).To(ContainSubstring("memory_gib"))
+			Expect(status.Message()).To(ContainSubstring("run_strategy"))
+		})
+
+		It("Accepts creation when user provides all required fields without template defaults", func() {
+			// Create a template WITHOUT spec defaults:
+			templatesDao, err := dao.NewGenericDAO[*privatev1.ComputeInstanceTemplate]().
+				SetLogger(logger).
+				SetTenancyLogic(tenancy).
+				Build()
+			Expect(err).ToNot(HaveOccurred())
+
+			template := privatev1.ComputeInstanceTemplate_builder{
+				Id:          "bare-template",
+				Title:       "Bare Template",
+				Description: "Template without defaults",
+				Metadata: privatev1.Metadata_builder{
+					Tenants: []string{"shared"},
+				}.Build(),
+			}.Build()
+			_, err = templatesDao.Create().SetObject(template).Do(ctx)
+			Expect(err).ToNot(HaveOccurred())
+
+			// Create with all required fields provided by user:
+			response, err := server.Create(ctx, privatev1.ComputeInstancesCreateRequest_builder{
+				Object: privatev1.ComputeInstance_builder{
+					Spec: privatev1.ComputeInstanceSpec_builder{
+						Template:  "bare-template",
+						Cores:     proto.Int32(4),
+						MemoryGib: proto.Int32(8),
+						Image: privatev1.ComputeInstanceImage_builder{
+							SourceType: "registry",
+							SourceRef:  "quay.io/containerdisks/fedora:latest",
+						}.Build(),
+						BootDisk: privatev1.ComputeInstanceDisk_builder{
+							SizeGib: 20,
+						}.Build(),
+						RunStrategy: proto.String("Always"),
+					}.Build(),
+				}.Build(),
+			}.Build())
+			Expect(err).ToNot(HaveOccurred())
+			Expect(response).ToNot(BeNil())
+			Expect(response.GetObject().GetSpec().GetCores()).To(Equal(int32(4)))
+		})
+
+		It("Partial defaults plus partial user input satisfies validation", func() {
+			// Create a template with only some spec defaults:
+			templatesDao, err := dao.NewGenericDAO[*privatev1.ComputeInstanceTemplate]().
+				SetLogger(logger).
+				SetTenancyLogic(tenancy).
+				Build()
+			Expect(err).ToNot(HaveOccurred())
+
+			template := privatev1.ComputeInstanceTemplate_builder{
+				Id:          "partial-defaults-template",
+				Title:       "Partial Defaults Template",
+				Description: "Template with partial spec defaults",
+				Metadata: privatev1.Metadata_builder{
+					Tenants: []string{"shared"},
+				}.Build(),
+				SpecDefaults: privatev1.ComputeInstanceTemplateSpecDefaults_builder{
+					Cores:       proto.Int32(2),
+					MemoryGib:   proto.Int32(4),
+					RunStrategy: proto.String("Always"),
+				}.Build(),
+			}.Build()
+			_, err = templatesDao.Create().SetObject(template).Do(ctx)
+			Expect(err).ToNot(HaveOccurred())
+
+			// User provides the remaining required fields:
+			response, err := server.Create(ctx, privatev1.ComputeInstancesCreateRequest_builder{
+				Object: privatev1.ComputeInstance_builder{
+					Spec: privatev1.ComputeInstanceSpec_builder{
+						Template: "partial-defaults-template",
+						Image: privatev1.ComputeInstanceImage_builder{
+							SourceType: "registry",
+							SourceRef:  "quay.io/containerdisks/fedora:latest",
+						}.Build(),
+						BootDisk: privatev1.ComputeInstanceDisk_builder{
+							SizeGib: 20,
+						}.Build(),
+					}.Build(),
+				}.Build(),
+			}.Build())
+			Expect(err).ToNot(HaveOccurred())
+			Expect(response).ToNot(BeNil())
+
+			spec := response.GetObject().GetSpec()
+			// Template defaults should be stored:
+			Expect(spec.GetCores()).To(Equal(int32(2)))
+			Expect(spec.GetMemoryGib()).To(Equal(int32(4)))
+			Expect(spec.GetRunStrategy()).To(Equal("Always"))
+			// User-provided fields should be stored:
+			Expect(spec.GetImage().GetSourceRef()).To(Equal("quay.io/containerdisks/fedora:latest"))
+			Expect(spec.GetBootDisk().GetSizeGib()).To(Equal(int32(20)))
 		})
 	})
 
@@ -688,6 +968,18 @@ var _ = Describe("Private compute instances server", func() {
 						Default:     memoryDefault,
 					},
 				},
+				SpecDefaults: privatev1.ComputeInstanceTemplateSpecDefaults_builder{
+					Cores:     proto.Int32(2),
+					MemoryGib: proto.Int32(2),
+					Image: privatev1.ComputeInstanceImage_builder{
+						SourceType: "registry",
+						SourceRef:  "quay.io/containerdisks/fedora:latest",
+					}.Build(),
+					BootDisk: privatev1.ComputeInstanceDisk_builder{
+						SizeGib: 10,
+					}.Build(),
+					RunStrategy: proto.String("Always"),
+				}.Build(),
 			}.Build()
 
 			_, err = templatesDao.Create().SetObject(template).Do(ctx)
