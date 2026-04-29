@@ -92,6 +92,7 @@ var _ = Describe("Clusters server", func() {
 				SetLogger(logger).
 				SetAttributionLogic(attribution).
 				SetTenancyLogic(tenancy).
+				SetScheme(testScheme).
 				Build()
 			Expect(err).ToNot(HaveOccurred())
 			Expect(server).ToNot(BeNil())
@@ -101,6 +102,7 @@ var _ = Describe("Clusters server", func() {
 			server, err := NewClustersServer().
 				SetAttributionLogic(attribution).
 				SetTenancyLogic(tenancy).
+				SetScheme(testScheme).
 				Build()
 			Expect(err).To(MatchError("logger is mandatory"))
 			Expect(server).To(BeNil())
@@ -110,6 +112,7 @@ var _ = Describe("Clusters server", func() {
 			server, err := NewClustersServer().
 				SetLogger(logger).
 				SetTenancyLogic(tenancy).
+				SetScheme(testScheme).
 				Build()
 			Expect(err).To(MatchError("attribution logic is mandatory"))
 			Expect(server).To(BeNil())
@@ -119,6 +122,7 @@ var _ = Describe("Clusters server", func() {
 			server, err := NewClustersServer().
 				SetLogger(logger).
 				SetAttributionLogic(attribution).
+				SetScheme(testScheme).
 				Build()
 			Expect(err).To(MatchError("tenancy logic is mandatory"))
 			Expect(server).To(BeNil())
@@ -142,6 +146,7 @@ var _ = Describe("Clusters server", func() {
 				SetLogger(logger).
 				SetAttributionLogic(attribution).
 				SetTenancyLogic(tenancy).
+				SetScheme(testScheme).
 				Build()
 			Expect(err).ToNot(HaveOccurred())
 
@@ -1599,6 +1604,7 @@ var _ = Describe("Clusters server", func() {
 				SetLogger(logger).
 				SetAttributionLogic(attribution).
 				SetTenancyLogic(tenancy).
+				SetScheme(testScheme).
 				Build()
 			Expect(err).ToNot(HaveOccurred())
 

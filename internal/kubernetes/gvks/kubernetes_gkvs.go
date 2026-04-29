@@ -15,14 +15,6 @@ package gvks
 
 import "k8s.io/apimachinery/pkg/runtime/schema"
 
-var ClusterOrder = schema.GroupVersionKind{
-	Group:   "osac.openshift.io",
-	Version: "v1alpha1",
-	Kind:    "ClusterOrder",
-}
-
-var ClusterOrderList = listGVK(ClusterOrder)
-
 var HostedCluster = schema.GroupVersionKind{
 	Group:   "hypershift.openshift.io",
 	Version: "v1beta1",
@@ -31,66 +23,10 @@ var HostedCluster = schema.GroupVersionKind{
 
 var HostedClusterList = listGVK(HostedCluster)
 
-var ComputeInstance = schema.GroupVersionKind{
-	Group:   "osac.openshift.io",
-	Version: "v1alpha1",
-	Kind:    "ComputeInstance",
-}
-
-var ComputeInstanceList = listGVK(ComputeInstance)
-
 var Secret = schema.GroupVersionKind{
 	Version: "v1",
 	Kind:    "Secret",
 }
-
-var Subnet = schema.GroupVersionKind{
-	Group:   "osac.openshift.io",
-	Version: "v1alpha1",
-	Kind:    "Subnet",
-}
-
-var SubnetList = listGVK(Subnet)
-
-var VirtualNetwork = schema.GroupVersionKind{
-	Group:   "osac.openshift.io",
-	Version: "v1alpha1",
-	Kind:    "VirtualNetwork",
-}
-
-var VirtualNetworkList = listGVK(VirtualNetwork)
-
-var NetworkClass = schema.GroupVersionKind{
-	Group:   "osac.openshift.io",
-	Version: "v1alpha1",
-	Kind:    "NetworkClass",
-}
-
-var NetworkClassList = listGVK(NetworkClass)
-
-var PublicIPPool = schema.GroupVersionKind{
-	Group:   "osac.openshift.io",
-	Version: "v1alpha1",
-	Kind:    "PublicIPPool",
-}
-
-var PublicIPPoolList = listGVK(PublicIPPool)
-
-var SecurityGroup = schema.GroupVersionKind{
-	Group:   "osac.openshift.io",
-	Version: "v1alpha1",
-	Kind:    "SecurityGroup",
-}
-
-var SecurityGroupList = listGVK(SecurityGroup)
-
-var PublicIP = schema.GroupVersionKind{
-	Group:   "osac.openshift.io",
-	Version: "v1alpha1",
-	Kind:    "PublicIP",
-}
-
-var PublicIPList = listGVK(PublicIP)
 
 func listGVK(gvk schema.GroupVersionKind) schema.GroupVersionKind {
 	gvk.Kind = gvk.Kind + "List"
