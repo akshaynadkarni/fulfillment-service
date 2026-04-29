@@ -30,9 +30,9 @@ import (
 
 var _ = Describe("Private public IPs server", func() {
 	var (
-		ctx              context.Context
-		publicIPPoolDao  *dao.GenericDAO[*privatev1.PublicIPPool]
-		publicIPDao      *dao.GenericDAO[*privatev1.PublicIP]
+		ctx             context.Context
+		publicIPPoolDao *dao.GenericDAO[*privatev1.PublicIPPool]
+		publicIPDao     *dao.GenericDAO[*privatev1.PublicIP]
 	)
 
 	BeforeEach(func() {

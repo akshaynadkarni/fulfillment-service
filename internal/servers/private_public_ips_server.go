@@ -55,9 +55,9 @@ var _ privatev1.PublicIPsServer = (*PrivatePublicIPsServer)(nil)
 type PrivatePublicIPsServer struct {
 	privatev1.UnimplementedPublicIPsServer
 
-	logger           *slog.Logger
-	generic          *GenericServer[*privatev1.PublicIP]
-	publicIPPoolDao  *dao.GenericDAO[*privatev1.PublicIPPool]
+	logger          *slog.Logger
+	generic         *GenericServer[*privatev1.PublicIP]
+	publicIPPoolDao *dao.GenericDAO[*privatev1.PublicIPPool]
 }
 
 // NewPrivatePublicIPsServer creates a builder that can then be used to configure and create a PrivatePublicIPsServer.
