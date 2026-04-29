@@ -2142,7 +2142,7 @@
   },
   "keycloakVersion" : "26.3.5",
   "userManagedAccessAllowed" : false,
-  "organizationsEnabled" : false,
+  "organizationsEnabled" : true,
   "verifiableCredentialsEnabled" : false,
   "adminPermissionsEnabled" : false,
   "clientProfiles" : {
