@@ -133,10 +133,32 @@ func Cmd() *cobra.Command {
 		"Base URL of the identity provider.",
 	)
 	flags.StringVar(
-		&runner.args.idpTokenFile,
-		"idp-token-file",
+		&runner.args.idpClientIdFile,
+		"idp-client-id-file",
 		"",
-		"File containing the identity provider authentication token.",
+		"File containing the OAuth client identifier for IDP authentication. Mutually exclusive with "+
+			"'--idp-client-id'.",
+	)
+	flags.StringVar(
+		&runner.args.idpClientId,
+		"idp-client-id",
+		"",
+		"OAuth client identifier for IDP authentication. Mutually exclusive with "+
+			"'--idp-client-id-file'.",
+	)
+	flags.StringVar(
+		&runner.args.idpClientSecretFile,
+		"idp-client-secret-file",
+		"",
+		"File containing the OAuth client secret for IDP authentication. Mutually exclusive with "+
+			"'--idp-client-secret'.",
+	)
+	flags.StringVar(
+		&runner.args.idpClientSecret,
+		"idp-client-secret",
+		"",
+		"OAuth client secret for IDP authentication. Mutually exclusive with "+
+			"'--idp-client-secret-file'.",
 	)
 	network.AddGrpcClientFlags(flags, network.GrpcClientName, network.DefaultGrpcAddress)
 	network.AddListenerFlags(flags, network.GrpcListenerName, network.DefaultGrpcAddress)
@@ -158,7 +180,10 @@ type runnerContext struct {
 		authClientSecretFile string
 		idpProvider          string
 		idpURL               string
-		idpTokenFile         string
+		idpClientId          string
+		idpClientIdFile      string
+		idpClientSecret      string
+		idpClientSecretFile  string
 	}
 	client *grpc.ClientConn
 }
@@ -191,6 +216,12 @@ func (r *runnerContext) run(cmd *cobra.Command, argv []string) error {
 	}
 	if r.args.authClientSecret != "" && r.args.authClientSecretFile != "" {
 		return fmt.Errorf("flags '--auth-client-secret' and '--auth-client-secret-file' are mutually exclusive")
+	}
+	if r.args.idpClientId != "" && r.args.idpClientIdFile != "" {
+		return fmt.Errorf("flags '--idp-client-id' and '--idp-client-id-file' are mutually exclusive")
+	}
+	if r.args.idpClientSecret != "" && r.args.idpClientSecretFile != "" {
+		return fmt.Errorf("flags '--idp-client-secret' and '--idp-client-secret-file' are mutually exclusive")
 	}
 	if r.args.authIssuerUrl == "" && r.args.authIssuerUrlFile == "" {
 		return fmt.Errorf("flag '--auth-issuer-url' or '--auth-issuer-url-file' is required")
@@ -771,17 +802,79 @@ func (r *runnerContext) createTokenSource(ctx context.Context, caPool *x509.Cert
 // createIDPManager creates the IDP client and organization manager if IDP is configured.
 // Returns nil if IDP is not configured (not an error).
 func (r *runnerContext) createIDPManager(ctx context.Context, caPool *x509.CertPool) (*idp.OrganizationManager, error) {
-	// Check if IDP is configured
-	if r.args.idpURL == "" || r.args.idpTokenFile == "" {
+	// Check if IDP is configured (need URL and credentials)
+	hasClientId := r.args.idpClientId != "" || r.args.idpClientIdFile != ""
+	hasClientSecret := r.args.idpClientSecret != "" || r.args.idpClientSecretFile != ""
+	if r.args.idpURL == "" || !hasClientId || !hasClientSecret {
 		r.logger.InfoContext(ctx, "IDP not configured, organization controller will not be started")
 		return nil, nil
 	}
 
-	// Create token source
-	r.logger.InfoContext(ctx, "Creating IDP token source")
-	idpTokenSource, err := auth.NewFileTokenSource().
+	// Get the client ID
+	idpClientId := r.args.idpClientId
+	if idpClientId == "" && r.args.idpClientIdFile != "" {
+		var err error
+		idpClientId, err = r.readTrimmedFile(r.args.idpClientIdFile)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"failed to read IDP client identifier from file '%s': %w",
+				r.args.idpClientIdFile, err,
+			)
+		}
+	}
+
+	// Get the client secret
+	idpClientSecret := r.args.idpClientSecret
+	if idpClientSecret == "" && r.args.idpClientSecretFile != "" {
+		var err error
+		idpClientSecret, err = r.readTrimmedFile(r.args.idpClientSecretFile)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"failed to read IDP client secret from file '%s': %w",
+				r.args.idpClientSecretFile, err,
+			)
+		}
+	}
+
+	// Get the issuer URL (same as auth issuer URL)
+	issuerUrl := r.args.authIssuerUrl
+	if issuerUrl == "" && r.args.authIssuerUrlFile != "" {
+		var err error
+		issuerUrl, err = r.readTrimmedFile(r.args.authIssuerUrlFile)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"failed to read issuer URL from file '%s': %w",
+				r.args.authIssuerUrlFile, err,
+			)
+		}
+	}
+
+	r.logger.DebugContext(
+		ctx,
+		"IDP credentials from flags",
+		slog.String("issuer_url", issuerUrl),
+		slog.String("!client_id", idpClientId),
+		slog.String("!client_secret", idpClientSecret),
+	)
+
+	// Create a token store that saves the token in memory
+	idpTokenStore, err := auth.NewMemoryTokenStore().
 		SetLogger(r.logger).
-		SetFile(r.args.idpTokenFile).
+		Build()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create IDP token store: %w", err)
+	}
+
+	// Create OAuth token source for IDP authentication
+	r.logger.InfoContext(ctx, "Creating IDP token source")
+	idpTokenSource, err := oauth.NewTokenSource().
+		SetLogger(r.logger).
+		SetStore(idpTokenStore).
+		SetCaPool(caPool).
+		SetIssuer(issuerUrl).
+		SetFlow(oauth.CredentialsFlow).
+		SetClientId(idpClientId).
+		SetClientSecret(idpClientSecret).
 		Build()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create IDP token source: %w", err)
