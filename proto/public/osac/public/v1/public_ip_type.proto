@@ -26,8 +26,8 @@ import "osac/public/v1/metadata_type.proto";
 // instances.
 //
 // The lifecycle follows: PENDING (awaiting allocation) -> ALLOCATED (IP assigned, not attached) ->
-// ATTACHED (bound to a ComputeInstance) -> RELEASING (being deallocated). Detaching from a
-// ComputeInstance returns the PublicIP to the ALLOCATED state.
+// ATTACHING (binding to instance) -> ATTACHED (bound to a ComputeInstance) -> RELEASING
+// (being deallocated). Detaching from a ComputeInstance returns the PublicIP to the ALLOCATED state.
 message PublicIP {
   // Unique identifier of the public IP.
   string id = 1;
@@ -98,9 +98,9 @@ message PublicIPStatus {
 
 // Lifecycle states for PublicIP resources.
 //
-// State transitions follow the attachment lifecycle: UNSPECIFIED -> PENDING -> ALLOCATED ->
-// ATTACHED -> RELEASING. A PublicIP in ATTACHED state can return to ALLOCATED when detached
-// from its ComputeInstance. FAILED is a terminal state for provisioning or release failures.
+// State transitions follow the attachment lifecycle: UNSPECIFIED -> PENDING -> ALLOCATED -> ATTACHING -> ATTACHED -> RELEASING.
+// A PublicIP in ATTACHED state can return to ALLOCATED when detached from its ComputeInstance.
+// FAILED is a terminal state for provisioning or release failures.
 enum PublicIPState {
   // State is unknown or has not been determined yet. Default state before initialization.
   PUBLIC_IP_STATE_UNSPECIFIED = 0;
@@ -114,26 +114,34 @@ enum PublicIPState {
   // The public IP has been assigned an address but is not attached to any ComputeInstance.
   //
   // The address is allocated and reserved. The IP can be attached to a ComputeInstance by
-  // setting spec.compute_instance, which transitions it to ATTACHED. Detaching from an
+  // setting spec.compute_instance, which transitions it to ATTACHING. Detaching from an
   // instance returns the IP to this state.
   PUBLIC_IP_STATE_ALLOCATED = 2;
+
+  // The public IP is being attached to a ComputeInstance.
+  //
+  // During this state, the system is moving the MetalLB LoadBalancer Service to bind the
+  // allocated address to the target ComputeInstance. Once complete, the state transitions
+  // to ATTACHED. Set immediately on successful Update validation when spec.compute_instance
+  // is populated on an ALLOCATED PublicIP.
+  PUBLIC_IP_STATE_ATTACHING = 3;
 
   // The public IP is attached to a ComputeInstance and actively routing traffic.
   //
   // The allocated address is bound to the ComputeInstance specified in spec.compute_instance.
   // Clearing the compute_instance field detaches the IP and returns it to ALLOCATED.
-  PUBLIC_IP_STATE_ATTACHED = 3;
+  PUBLIC_IP_STATE_ATTACHED = 4;
 
   // The public IP is being released and its address returned to the parent pool.
   //
   // During this state, the system is removing the MetalLB LoadBalancer Service and cleaning
   // up cluster resources. The IP address will be returned to the pool's available capacity
   // once release completes.
-  PUBLIC_IP_STATE_RELEASING = 4;
+  PUBLIC_IP_STATE_RELEASING = 5;
 
   // Provisioning or release failed. Check status.message for error details.
   //
   // This is a terminal error state. The PublicIP may require deletion and recreation,
   // or an administrator can retry via the private API Signal RPC.
-  PUBLIC_IP_STATE_FAILED = 5;
+  PUBLIC_IP_STATE_FAILED = 6;
 }
