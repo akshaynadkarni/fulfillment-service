@@ -18,6 +18,7 @@ import (
 
 	"github.com/osac-project/fulfillment-service/internal/cmd/cli/describe/cluster"
 	"github.com/osac-project/fulfillment-service/internal/cmd/cli/describe/computeinstance"
+	"github.com/osac-project/fulfillment-service/internal/cmd/cli/describe/publicip"
 	"github.com/osac-project/fulfillment-service/internal/cmd/cli/describe/securitygroup"
 	"github.com/osac-project/fulfillment-service/internal/cmd/cli/describe/subnet"
 	"github.com/osac-project/fulfillment-service/internal/cmd/cli/describe/virtualnetwork"
@@ -30,6 +31,7 @@ func Cmd() *cobra.Command {
 	}
 	result.AddCommand(cluster.Cmd())
 	result.AddCommand(computeinstance.Cmd())
+	result.AddCommand(publicip.Cmd())
 	result.AddCommand(virtualnetwork.Cmd())
 	result.AddCommand(subnet.Cmd())
 	result.AddCommand(securitygroup.Cmd())
