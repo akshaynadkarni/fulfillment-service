@@ -16,6 +16,7 @@ syntax = "proto3";
 package osac.public.v1;
 
 import "google/protobuf/any.proto";
+import "osac/public/v1/cluster_type.proto";
 import "osac/public/v1/metadata_type.proto";
 
 // A cluster template defines a type of cluster that can be created by the user. Note that the user doesn't create these
@@ -41,6 +42,12 @@ message ClusterTemplate {
 
   // Initial node sets of the cluster.
   map<string, ClusterTemplateNodeSet> node_sets = 6;
+
+  // Default values for cluster spec fields. When a user creates a cluster
+  // without setting these fields, these values are applied.
+  //
+  // User-provided spec field values always override these defaults.
+  ClusterTemplateSpecDefaults spec_defaults = 7;
 }
 
 // Contains type and documentation of a template parameter.
@@ -99,4 +106,20 @@ message ClusterTemplateNodeSet {
 
   // Number of nodes of the set.
   int32 size = 2;
+}
+
+// Default values for cluster spec fields. These are applied when a user creates a cluster without
+// providing explicit values. User-provided values always override these defaults.
+message ClusterTemplateSpecDefaults {
+  // Default pull secret for authenticating to container image repositories.
+  optional string pull_secret = 1;
+
+  // Default SSH public key installed on cluster worker nodes.
+  optional string ssh_public_key = 2;
+
+  // Default OCP release image URL.
+  optional string release_image = 3;
+
+  // Default cluster networking configuration.
+  optional ClusterNetwork network = 4;
 }
