@@ -155,8 +155,7 @@ func (c *runnerContext) run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Delete each resolved object. Attempt all deletions and report errors at
-	// the end rather than stopping on the first failure.
+	// Delete each resolved object. Attempt all deletions and report errors at the end
 	var hadErrors bool
 	for _, object := range objects {
 		id := c.helper.GetId(object)

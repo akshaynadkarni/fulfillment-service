@@ -113,7 +113,7 @@ func (c *runnerContext) run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Delete each resolved public IP. Attempt all deletions and report errorsat the end 
+	// Delete each resolved public IP. Attempt all deletions and report errorsat the end
 	var hadErrors bool
 	for i, id := range ids {
 		_, err = client.Delete(ctx, publicv1.PublicIPsDeleteRequest_builder{Id: id}.Build())
