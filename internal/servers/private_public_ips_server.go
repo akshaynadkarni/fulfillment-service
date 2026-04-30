@@ -214,18 +214,21 @@ func (s *PrivatePublicIPsServer) Update(ctx context.Context,
 	}
 
 	existingPublicIP := getResponse.GetObject()
+	mask := request.GetUpdateMask()
 
-	// Check pool immutability:
-	if err = validateImmutableFieldsPublicIP(request.GetObject(), existingPublicIP); err != nil {
-		return
+	if updateIncludesField(mask, "spec.pool") {
+		if err = validateImmutableFieldsPublicIP(request.GetObject(), existingPublicIP); err != nil {
+			return
+		}
 	}
 
-	// Check state machine transitions:
-	newState := request.GetObject().GetStatus().GetState()
-	existingState := existingPublicIP.GetStatus().GetState()
-	if newState != privatev1.PublicIPState_PUBLIC_IP_STATE_UNSPECIFIED && newState != existingState {
-		if err = validatePublicIPStateTransition(existingState, newState); err != nil {
-			return
+	if updateIncludesField(mask, "status.state") {
+		newState := request.GetObject().GetStatus().GetState()
+		existingState := existingPublicIP.GetStatus().GetState()
+		if newState != privatev1.PublicIPState_PUBLIC_IP_STATE_UNSPECIFIED && newState != existingState {
+			if err = validatePublicIPStateTransition(existingState, newState); err != nil {
+				return
+			}
 		}
 	}
 
@@ -330,7 +333,9 @@ func (s *PrivatePublicIPsServer) validatePoolReference(ctx context.Context, pool
 			poolID, pool.GetStatus().GetState().String())
 	}
 
-	// Check pool has available capacity:
+	// Best-effort check for user-facing error quality. The real serialization
+	// point is updatePoolCapacity, which uses the pool's resource_version for
+	// optimistic locking to prevent concurrent over-allocation.
 	if pool.GetStatus().GetAvailable() <= 0 {
 		return grpcstatus.Errorf(grpccodes.FailedPrecondition,
 			"pool '%s' has no available capacity", poolID)
@@ -356,9 +361,14 @@ func (s *PrivatePublicIPsServer) updatePoolCapacity(ctx context.Context, poolID 
 	pool := poolResponse.GetObject()
 	newAllocated := pool.GetStatus().GetAllocated() + delta
 	newAvailable := pool.GetStatus().GetAvailable() - delta
-	if newAllocated < 0 || newAvailable < 0 {
+	if newAvailable < 0 {
 		return grpcstatus.Errorf(grpccodes.FailedPrecondition,
 			"pool '%s' has no available capacity", poolID)
+	}
+	if newAllocated < 0 {
+		return grpcstatus.Errorf(grpccodes.FailedPrecondition,
+			"pool '%s' capacity inconsistency: allocated would become %d (available: %d)",
+			poolID, newAllocated, newAvailable)
 	}
 	pool.GetStatus().SetAllocated(newAllocated)
 	pool.GetStatus().SetAvailable(newAvailable)

@@ -108,6 +108,35 @@ var _ = Describe("Private public IPs server", func() {
 		return resp.GetObject().GetId()
 	}
 
+	// createPublicIPInState creates a PublicIP via the server (triggers pool validation and
+	// capacity tracking), then sets its state via the DAO (bypasses state machine validation
+	// since the controller, not the server, sets the initial state in production).
+	createPublicIPInState := func(
+		server *PrivatePublicIPsServer,
+		state privatev1.PublicIPState,
+	) *privatev1.PublicIP {
+		poolID := createReadyPool(ctx, 100, 0)
+		resp, err := server.Create(ctx, privatev1.PublicIPsCreateRequest_builder{
+			Object: privatev1.PublicIP_builder{
+				Metadata: privatev1.Metadata_builder{
+					Tenants: []string{"shared"},
+				}.Build(),
+				Spec: privatev1.PublicIPSpec_builder{
+					Pool: poolID,
+				}.Build(),
+			}.Build(),
+		}.Build())
+		Expect(err).ToNot(HaveOccurred())
+		object := resp.GetObject()
+
+		object.SetStatus(privatev1.PublicIPStatus_builder{
+			State: state,
+		}.Build())
+		daoResp, err := publicIPDao.Update().SetObject(object).Do(ctx)
+		Expect(err).ToNot(HaveOccurred())
+		return daoResp.GetObject()
+	}
+
 	Describe("Creation", func() {
 		It("Can be built if all the required parameters are set", func() {
 			server, err := NewPrivatePublicIPsServer().
@@ -579,33 +608,6 @@ var _ = Describe("Private public IPs server", func() {
 			Expect(err).ToNot(HaveOccurred())
 		})
 
-		// createPublicIPInState creates a PublicIP via the server (triggers pool validation and capacity
-		// tracking), then sets its initial state via the DAO (bypasses state machine validation since
-		// the controller, not the server, sets the initial PENDING state in production).
-		createPublicIPInState := func(initialState privatev1.PublicIPState) *privatev1.PublicIP {
-			poolID := createReadyPool(ctx, 100, 0)
-			resp, err := publicIPsServer.Create(ctx, privatev1.PublicIPsCreateRequest_builder{
-				Object: privatev1.PublicIP_builder{
-					Metadata: privatev1.Metadata_builder{
-						Tenants: []string{"shared"},
-					}.Build(),
-					Spec: privatev1.PublicIPSpec_builder{
-						Pool: poolID,
-					}.Build(),
-				}.Build(),
-			}.Build())
-			Expect(err).ToNot(HaveOccurred())
-			object := resp.GetObject()
-
-			// Set the initial state via DAO (production path: controller sets PENDING via Signal):
-			object.SetStatus(privatev1.PublicIPStatus_builder{
-				State: initialState,
-			}.Build())
-			daoResp, err := publicIPDao.Update().SetObject(object).Do(ctx)
-			Expect(err).ToNot(HaveOccurred())
-			return daoResp.GetObject()
-		}
-
 		// setStateOnObject sets the state on a PublicIP, handling the case where Status is nil.
 		setStateOnObject := func(object *privatev1.PublicIP, state privatev1.PublicIPState) {
 			if object.GetStatus() == nil {
@@ -628,20 +630,20 @@ var _ = Describe("Private public IPs server", func() {
 		}
 
 		It("accepts PENDING to ALLOCATED transition", func() {
-			object := createPublicIPInState(privatev1.PublicIPState_PUBLIC_IP_STATE_PENDING)
+			object := createPublicIPInState(publicIPsServer, privatev1.PublicIPState_PUBLIC_IP_STATE_PENDING)
 			updated := transitionTo(object, privatev1.PublicIPState_PUBLIC_IP_STATE_ALLOCATED)
 			Expect(updated.GetStatus().GetState()).To(Equal(privatev1.PublicIPState_PUBLIC_IP_STATE_ALLOCATED))
 		})
 
 		It("accepts ALLOCATED to ATTACHED transition", func() {
-			object := createPublicIPInState(privatev1.PublicIPState_PUBLIC_IP_STATE_PENDING)
+			object := createPublicIPInState(publicIPsServer, privatev1.PublicIPState_PUBLIC_IP_STATE_PENDING)
 			object = transitionTo(object, privatev1.PublicIPState_PUBLIC_IP_STATE_ALLOCATED)
 			updated := transitionTo(object, privatev1.PublicIPState_PUBLIC_IP_STATE_ATTACHED)
 			Expect(updated.GetStatus().GetState()).To(Equal(privatev1.PublicIPState_PUBLIC_IP_STATE_ATTACHED))
 		})
 
 		It("accepts ATTACHED to RELEASING transition", func() {
-			object := createPublicIPInState(privatev1.PublicIPState_PUBLIC_IP_STATE_PENDING)
+			object := createPublicIPInState(publicIPsServer, privatev1.PublicIPState_PUBLIC_IP_STATE_PENDING)
 			object = transitionTo(object, privatev1.PublicIPState_PUBLIC_IP_STATE_ALLOCATED)
 			object = transitionTo(object, privatev1.PublicIPState_PUBLIC_IP_STATE_ATTACHED)
 			updated := transitionTo(object, privatev1.PublicIPState_PUBLIC_IP_STATE_RELEASING)
@@ -649,7 +651,7 @@ var _ = Describe("Private public IPs server", func() {
 		})
 
 		It("accepts RELEASING to ALLOCATED transition", func() {
-			object := createPublicIPInState(privatev1.PublicIPState_PUBLIC_IP_STATE_PENDING)
+			object := createPublicIPInState(publicIPsServer, privatev1.PublicIPState_PUBLIC_IP_STATE_PENDING)
 			object = transitionTo(object, privatev1.PublicIPState_PUBLIC_IP_STATE_ALLOCATED)
 			object = transitionTo(object, privatev1.PublicIPState_PUBLIC_IP_STATE_ATTACHED)
 			object = transitionTo(object, privatev1.PublicIPState_PUBLIC_IP_STATE_RELEASING)
@@ -658,7 +660,7 @@ var _ = Describe("Private public IPs server", func() {
 		})
 
 		It("rejects PENDING to ATTACHED transition", func() {
-			object := createPublicIPInState(privatev1.PublicIPState_PUBLIC_IP_STATE_PENDING)
+			object := createPublicIPInState(publicIPsServer, privatev1.PublicIPState_PUBLIC_IP_STATE_PENDING)
 			setStateOnObject(object, privatev1.PublicIPState_PUBLIC_IP_STATE_ATTACHED)
 			_, err := publicIPsServer.Update(ctx, privatev1.PublicIPsUpdateRequest_builder{
 				Object: object,
@@ -671,7 +673,7 @@ var _ = Describe("Private public IPs server", func() {
 		})
 
 		It("rejects ALLOCATED to RELEASING transition", func() {
-			object := createPublicIPInState(privatev1.PublicIPState_PUBLIC_IP_STATE_ALLOCATED)
+			object := createPublicIPInState(publicIPsServer, privatev1.PublicIPState_PUBLIC_IP_STATE_ALLOCATED)
 			setStateOnObject(object, privatev1.PublicIPState_PUBLIC_IP_STATE_RELEASING)
 			_, err := publicIPsServer.Update(ctx, privatev1.PublicIPsUpdateRequest_builder{
 				Object: object,
@@ -684,7 +686,7 @@ var _ = Describe("Private public IPs server", func() {
 		})
 
 		It("rejects ATTACHED to ALLOCATED transition", func() {
-			object := createPublicIPInState(privatev1.PublicIPState_PUBLIC_IP_STATE_ATTACHED)
+			object := createPublicIPInState(publicIPsServer, privatev1.PublicIPState_PUBLIC_IP_STATE_ATTACHED)
 			setStateOnObject(object, privatev1.PublicIPState_PUBLIC_IP_STATE_ALLOCATED)
 			_, err := publicIPsServer.Update(ctx, privatev1.PublicIPsUpdateRequest_builder{
 				Object: object,
@@ -697,7 +699,7 @@ var _ = Describe("Private public IPs server", func() {
 		})
 
 		It("skips state validation when new state is UNSPECIFIED", func() {
-			object := createPublicIPInState(privatev1.PublicIPState_PUBLIC_IP_STATE_ALLOCATED)
+			object := createPublicIPInState(publicIPsServer, privatev1.PublicIPState_PUBLIC_IP_STATE_ALLOCATED)
 
 			// Update without setting state (UNSPECIFIED is the zero value):
 			object.GetMetadata().Name = "updated-name"
@@ -723,33 +725,8 @@ var _ = Describe("Private public IPs server", func() {
 			Expect(err).ToNot(HaveOccurred())
 		})
 
-		// createPublicIPWithState creates a PublicIP via the server, then sets its state via DAO.
-		createPublicIPWithState := func(state privatev1.PublicIPState) *privatev1.PublicIP {
-			poolID := createReadyPool(ctx, 100, 0)
-			resp, err := publicIPsServer.Create(ctx, privatev1.PublicIPsCreateRequest_builder{
-				Object: privatev1.PublicIP_builder{
-					Metadata: privatev1.Metadata_builder{
-						Tenants: []string{"shared"},
-					}.Build(),
-					Spec: privatev1.PublicIPSpec_builder{
-						Pool: poolID,
-					}.Build(),
-				}.Build(),
-			}.Build())
-			Expect(err).ToNot(HaveOccurred())
-			object := resp.GetObject()
-
-			// Set the state via DAO to bypass state machine validation in test setup:
-			object.SetStatus(privatev1.PublicIPStatus_builder{
-				State: state,
-			}.Build())
-			daoResp, err := publicIPDao.Update().SetObject(object).Do(ctx)
-			Expect(err).ToNot(HaveOccurred())
-			return daoResp.GetObject()
-		}
-
 		It("rejects Delete when state is ATTACHED", func() {
-			object := createPublicIPWithState(privatev1.PublicIPState_PUBLIC_IP_STATE_ATTACHED)
+			object := createPublicIPInState(publicIPsServer, privatev1.PublicIPState_PUBLIC_IP_STATE_ATTACHED)
 
 			_, err := publicIPsServer.Delete(ctx, privatev1.PublicIPsDeleteRequest_builder{
 				Id: object.GetId(),
@@ -762,7 +739,7 @@ var _ = Describe("Private public IPs server", func() {
 		})
 
 		It("rejects Delete when state is RELEASING", func() {
-			object := createPublicIPWithState(privatev1.PublicIPState_PUBLIC_IP_STATE_RELEASING)
+			object := createPublicIPInState(publicIPsServer, privatev1.PublicIPState_PUBLIC_IP_STATE_RELEASING)
 
 			_, err := publicIPsServer.Delete(ctx, privatev1.PublicIPsDeleteRequest_builder{
 				Id: object.GetId(),
@@ -775,7 +752,7 @@ var _ = Describe("Private public IPs server", func() {
 		})
 
 		It("allows Delete when state is ALLOCATED", func() {
-			object := createPublicIPWithState(privatev1.PublicIPState_PUBLIC_IP_STATE_ALLOCATED)
+			object := createPublicIPInState(publicIPsServer, privatev1.PublicIPState_PUBLIC_IP_STATE_ALLOCATED)
 
 			_, err := publicIPsServer.Delete(ctx, privatev1.PublicIPsDeleteRequest_builder{
 				Id: object.GetId(),
@@ -784,7 +761,7 @@ var _ = Describe("Private public IPs server", func() {
 		})
 
 		It("allows Delete when state is PENDING", func() {
-			object := createPublicIPWithState(privatev1.PublicIPState_PUBLIC_IP_STATE_PENDING)
+			object := createPublicIPInState(publicIPsServer, privatev1.PublicIPState_PUBLIC_IP_STATE_PENDING)
 
 			_, err := publicIPsServer.Delete(ctx, privatev1.PublicIPsDeleteRequest_builder{
 				Id: object.GetId(),
