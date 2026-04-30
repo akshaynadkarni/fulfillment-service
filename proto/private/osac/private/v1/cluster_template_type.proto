@@ -16,6 +16,7 @@ syntax = "proto3";
 package osac.private.v1;
 
 import "google/protobuf/any.proto";
+import "osac/private/v1/cluster_type.proto";
 import "osac/private/v1/metadata_type.proto";
 
 message ClusterTemplate {
@@ -26,6 +27,12 @@ message ClusterTemplate {
   string description = 4;
   repeated ClusterTemplateParameterDefinition parameters = 5;
   map<string, ClusterTemplateNodeSet> node_sets = 6;
+
+  // Default values for cluster spec fields. When a user creates a cluster
+  // without setting these fields, these values are applied.
+  //
+  // User-provided spec field values always override these defaults.
+  ClusterTemplateSpecDefaults spec_defaults = 7;
 }
 
 message ClusterTemplateParameterDefinition {
@@ -40,4 +47,19 @@ message ClusterTemplateParameterDefinition {
 message ClusterTemplateNodeSet {
   string host_type = 1;
   int32 size = 2;
+}
+
+// Default values for cluster spec fields.
+message ClusterTemplateSpecDefaults {
+  // Default pull secret for authenticating to container image repositories.
+  optional string pull_secret = 1;
+
+  // Default SSH public key installed on cluster worker nodes.
+  optional string ssh_public_key = 2;
+
+  // Default OCP release image URL.
+  optional string release_image = 3;
+
+  // Default cluster networking configuration.
+  optional ClusterNetwork network = 4;
 }

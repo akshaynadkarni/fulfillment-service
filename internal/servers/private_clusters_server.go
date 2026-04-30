@@ -522,6 +522,14 @@ func (s *PrivateClustersServer) validateAndTransformCluster(ctx context.Context,
 		return grpcstatus.Errorf(grpccodes.InvalidArgument, "template '%s' has been deleted", templateRef)
 	}
 
+	// Apply spec defaults from the template (user values take precedence):
+	utils.ApplyClusterSpecDefaults(cluster.GetSpec(), template.GetSpecDefaults())
+
+	// Validate cluster spec fields (CIDR format, etc.) after defaults have been applied:
+	if err = utils.ValidateClusterSpecFields(cluster.GetSpec()); err != nil {
+		return err
+	}
+
 	// Check that the host types given in the cluster and the template exist, and index them by identifier and
 	// name, so tha it will be easier to look them up later..
 	hostTypes := map[string]*privatev1.HostType{}
