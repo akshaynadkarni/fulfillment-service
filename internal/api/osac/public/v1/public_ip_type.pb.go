@@ -67,13 +67,15 @@ const (
 	// The public IP is attached to a ComputeInstance and actively routing traffic.
 	//
 	// The allocated address is bound to the ComputeInstance specified in spec.compute_instance.
-	// Clearing the compute_instance field detaches the IP and returns it to ALLOCATED.
+	// Clearing the compute_instance field detaches the IP, transitioning through RELEASING
+	// back to ALLOCATED.
 	PublicIPState_PUBLIC_IP_STATE_ATTACHED PublicIPState = 4
-	// The public IP is being released and its address returned to the parent pool.
+	// The public IP is being released from its current binding.
 	//
-	// During this state, the system is removing the MetalLB LoadBalancer Service and cleaning
-	// up cluster resources. The IP address will be returned to the pool's available capacity
-	// once release completes.
+	// On detach (clearing spec.compute_instance from an ATTACHED IP), the system unbinds
+	// the address from the ComputeInstance. The address is preserved and the IP returns to
+	// ALLOCATED once complete. On deallocation (deleting the PublicIP), the system removes
+	// the MetalLB LoadBalancer Service and returns the address to the pool.
 	PublicIPState_PUBLIC_IP_STATE_RELEASING PublicIPState = 5
 	// Provisioning or release failed. Check status.message for error details.
 	//
@@ -134,8 +136,9 @@ func (x PublicIPState) Number() protoreflect.EnumNumber {
 // instances.
 //
 // The lifecycle follows: PENDING (awaiting allocation) -> ALLOCATED (IP assigned, not attached) ->
-// ATTACHING (binding to instance) -> ATTACHED (bound to a ComputeInstance) -> RELEASING
-// (being deallocated). Detaching from a ComputeInstance returns the PublicIP to the ALLOCATED state.
+// ATTACHING (binding to instance) -> ATTACHED (bound to a ComputeInstance).
+// Detaching transitions through RELEASING back to ALLOCATED (address preserved).
+// Deallocation also uses RELEASING, after which the address is returned to the pool.
 type PublicIP struct {
 	state protoimpl.MessageState `protogen:"hybrid.v1"`
 	// Unique identifier of the public IP.
@@ -293,8 +296,8 @@ type PublicIPSpec struct {
 	// ComputeInstance ID to attach this public IP to. Optional.
 	//
 	// When set, the system binds this public IP to the specified ComputeInstance, making the
-	// instance reachable at the allocated address. When cleared, the IP is detached and returns
-	// to the ALLOCATED state (the address is retained but no longer routes to an instance).
+	// instance reachable at the allocated address. When cleared, the IP transitions through
+	// RELEASING back to ALLOCATED (the address is retained but no longer routes to an instance).
 	//
 	// Example: "ci-xyz789"
 	ComputeInstance *string `protobuf:"bytes,2,opt,name=compute_instance,json=computeInstance,proto3,oneof" json:"compute_instance,omitempty"`
@@ -373,8 +376,8 @@ type PublicIPSpec_builder struct {
 	// ComputeInstance ID to attach this public IP to. Optional.
 	//
 	// When set, the system binds this public IP to the specified ComputeInstance, making the
-	// instance reachable at the allocated address. When cleared, the IP is detached and returns
-	// to the ALLOCATED state (the address is retained but no longer routes to an instance).
+	// instance reachable at the allocated address. When cleared, the IP transitions through
+	// RELEASING back to ALLOCATED (the address is retained but no longer routes to an instance).
 	//
 	// Example: "ci-xyz789"
 	ComputeInstance *string
@@ -405,8 +408,8 @@ type PublicIPStatus struct {
 	Message *string `protobuf:"bytes,2,opt,name=message,proto3,oneof" json:"message,omitempty"`
 	// Allocated IP address from the parent pool's CIDR range.
 	//
-	// Populated once the IP transitions to ALLOCATED state. Remains stable through ATTACHED and
-	// back to ALLOCATED. Cleared only during RELEASING.
+	// Populated once the IP transitions to ALLOCATED state. Remains stable through ATTACHING,
+	// ATTACHED, and RELEASING (detach). Cleared only when the IP is deallocated.
 	Address string `protobuf:"bytes,3,opt,name=address,proto3" json:"address,omitempty"`
 	// Parent PublicIPPool ID that this IP was allocated from.
 	//
@@ -509,8 +512,8 @@ type PublicIPStatus_builder struct {
 	Message *string
 	// Allocated IP address from the parent pool's CIDR range.
 	//
-	// Populated once the IP transitions to ALLOCATED state. Remains stable through ATTACHED and
-	// back to ALLOCATED. Cleared only during RELEASING.
+	// Populated once the IP transitions to ALLOCATED state. Remains stable through ATTACHING,
+	// ATTACHED, and RELEASING (detach). Cleared only when the IP is deallocated.
 	Address string
 	// Parent PublicIPPool ID that this IP was allocated from.
 	//
