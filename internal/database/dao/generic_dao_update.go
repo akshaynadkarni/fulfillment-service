@@ -152,7 +152,7 @@ func (r *UpdateRequest[O]) do(ctx context.Context) (response *UpdateResponse[O],
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.UniqueViolation {
-			err = &ErrConflict{
+			err = &ErrAlreadyExists{
 				ID: id,
 			}
 		}
