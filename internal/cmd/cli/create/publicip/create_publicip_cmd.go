@@ -35,10 +35,7 @@ func Cmd() *cobra.Command {
 		Long: "Allocate a public IP address from an existing PublicIPPool. " +
 			"The --pool flag is required.",
 		Example: `  # Create a public IP from a pool
-  osac create publicip --name my-ip --pool pool-abc123
-
-  # Create a public IP and attach it to a compute instance
-  osac create publicip --name my-ip --pool pool-abc123 --compute-instance ci-xyz789`,
+  osac create publicip --name my-ip --pool pool-abc123`,
 		Args: cobra.NoArgs,
 		RunE: runner.run,
 	}
@@ -56,20 +53,13 @@ func Cmd() *cobra.Command {
 		"",
 		"ID of the parent PublicIPPool to allocate the address from.",
 	)
-	flags.StringVar(
-		&runner.args.computeInstance,
-		"compute-instance",
-		"",
-		"ID of the ComputeInstance to attach this public IP to. Optional.",
-	)
 	return result
 }
 
 type runnerContext struct {
 	args struct {
-		name            string
-		pool            string
-		computeInstance string
+		name string
+		pool string
 	}
 	logger  *slog.Logger
 	console *terminal.Console
@@ -103,9 +93,6 @@ func (c *runnerContext) run(cmd *cobra.Command, args []string) error {
 
 	spec := publicv1.PublicIPSpec_builder{
 		Pool: c.args.pool,
-	}
-	if c.args.computeInstance != "" {
-		spec.ComputeInstance = &c.args.computeInstance
 	}
 	publicIP := publicv1.PublicIP_builder{
 		Metadata: publicv1.Metadata_builder{Name: c.args.name}.Build(),
