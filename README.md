@@ -1,6 +1,7 @@
 # Fulfillment service
 
-This project contains the code for the fulfillment service.
+This project contains the code for the fulfillment service. For instructions on how to install it
+in a production environment see the [installation guide](docs/INSTALL.md).
 
 ## Required development tools
 
