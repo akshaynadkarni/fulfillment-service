@@ -609,6 +609,10 @@ func (s *GenericServer[O]) Update(ctx context.Context, request any, response any
 			if errors.As(err, &conflictErr) {
 				return grpcstatus.Errorf(grpccodes.Aborted, "%s", conflictErr.Error())
 			}
+			var alreadyExistsErr *dao.ErrAlreadyExists
+			if errors.As(err, &alreadyExistsErr) {
+				return grpcstatus.Errorf(grpccodes.AlreadyExists, "%s", alreadyExistsErr.Error())
+			}
 			var deniedErr *dao.ErrDenied
 			if errors.As(err, &deniedErr) {
 				return grpcstatus.Errorf(grpccodes.PermissionDenied, "%s", deniedErr.Reason)
