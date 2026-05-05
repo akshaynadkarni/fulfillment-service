@@ -98,7 +98,12 @@ func (c *runnerContext) run(cmd *cobra.Command, args []string) error {
 	}
 
 	pip := getResponse.GetObject()
-	pip.GetSpec().SetComputeInstance(c.args.computeInstance)
+	spec := pip.GetSpec()
+	if spec == nil {
+		spec = new(publicv1.PublicIPSpec)
+		pip.SetSpec(spec)
+	}
+	spec.SetComputeInstance(c.args.computeInstance)
 
 	response, err := client.Update(ctx, publicv1.PublicIPsUpdateRequest_builder{
 		Object: pip,

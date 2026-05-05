@@ -79,7 +79,9 @@ func (c *runnerContext) run(cmd *cobra.Command, args []string) error {
 	}
 
 	pip := getResponse.GetObject()
-	pip.GetSpec().ClearComputeInstance()
+	if spec := pip.GetSpec(); spec != nil {
+		spec.ClearComputeInstance()
+	}
 
 	response, err := client.Update(ctx, publicv1.PublicIPsUpdateRequest_builder{
 		Object: pip,
