@@ -57,7 +57,7 @@ var _ = Describe("Create command", func() {
 				subcommandNames = append(subcommandNames, subcmd.Name())
 			}
 
-			Expect(subcommandNames).To(ContainElements("cluster", "computeinstance", "hub", "publicip", "virtualnetwork", "subnet", "securitygroup"))
+			Expect(subcommandNames).To(ContainElements("cluster", "computeinstance", "hub", "publicip", "publicipattachment", "virtualnetwork", "subnet", "securitygroup"))
 		})
 	})
 })

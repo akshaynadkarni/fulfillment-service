@@ -71,14 +71,21 @@ func (c *runnerContext) run(cmd *cobra.Command, args []string) error {
 
 	client := publicv1.NewPublicIPsClient(conn)
 
-	getResponse, err := client.Get(ctx, publicv1.PublicIPsGetRequest_builder{
-		Id: args[0],
+	filter := fmt.Sprintf(`this.id == %[1]q || this.metadata.name == %[1]q`, args[0])
+	listResponse, err := client.List(ctx, publicv1.PublicIPsListRequest_builder{
+		Filter: &filter,
 	}.Build())
 	if err != nil {
-		return fmt.Errorf("failed to get public IP '%s': %w", args[0], err)
+		return fmt.Errorf("failed to resolve public IP '%s': %w", args[0], err)
+	}
+	if len(listResponse.GetItems()) == 0 {
+		return fmt.Errorf("public IP not found: %s", args[0])
+	}
+	if len(listResponse.GetItems()) > 1 {
+		return fmt.Errorf("multiple public IPs match '%s', use the ID instead", args[0])
 	}
 
-	pip := getResponse.GetObject()
+	pip := listResponse.GetItems()[0]
 	if spec := pip.GetSpec(); spec != nil {
 		spec.ClearComputeInstance()
 	}

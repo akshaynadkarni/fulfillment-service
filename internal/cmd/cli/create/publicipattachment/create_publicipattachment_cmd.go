@@ -46,13 +46,13 @@ func Cmd() *cobra.Command {
 		&runner.args.publicIP,
 		"publicip",
 		"",
-		"ID of the public IP to attach.",
+		"ID or name of the public IP to attach.",
 	)
 	flags.StringVar(
 		&runner.args.computeInstance,
 		"compute-instance",
 		"",
-		"ID of the compute instance to attach the public IP to.",
+		"ID or name of the compute instance to attach the public IP to.",
 	)
 	result.MarkFlagRequired("publicip")         //nolint:errcheck
 	result.MarkFlagRequired("compute-instance") //nolint:errcheck
@@ -90,14 +90,21 @@ func (c *runnerContext) run(cmd *cobra.Command, args []string) error {
 
 	client := publicv1.NewPublicIPsClient(conn)
 
-	getResponse, err := client.Get(ctx, publicv1.PublicIPsGetRequest_builder{
-		Id: c.args.publicIP,
+	filter := fmt.Sprintf(`this.id == %[1]q || this.metadata.name == %[1]q`, c.args.publicIP)
+	listResponse, err := client.List(ctx, publicv1.PublicIPsListRequest_builder{
+		Filter: &filter,
 	}.Build())
 	if err != nil {
-		return fmt.Errorf("failed to get public IP '%s': %w", c.args.publicIP, err)
+		return fmt.Errorf("failed to resolve public IP '%s': %w", c.args.publicIP, err)
+	}
+	if len(listResponse.GetItems()) == 0 {
+		return fmt.Errorf("public IP not found: %s", c.args.publicIP)
+	}
+	if len(listResponse.GetItems()) > 1 {
+		return fmt.Errorf("multiple public IPs match '%s', use the ID instead", c.args.publicIP)
 	}
 
-	pip := getResponse.GetObject()
+	pip := listResponse.GetItems()[0]
 	spec := pip.GetSpec()
 	if spec == nil {
 		spec = new(publicv1.PublicIPSpec)

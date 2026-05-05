@@ -54,7 +54,7 @@ func Cmd() *cobra.Command {
 	)
 	result.MarkFlagRequired("pool") //nolint:errcheck
 	// Note: attaching a compute instance at creation time (via --compute-instance flag) is future
-	// scope. To attach a public IP to a compute instance, use 'osac attach publicip'.
+	// scope. To attach a public IP to a compute instance, use 'osac create publicipattachment'.
 	return result
 }
 
