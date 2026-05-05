@@ -46,5 +46,5 @@ type Target struct {
 	ResourceID   string
 	HubID        string
 	Namespace    string
-	VMName       string
+	CRName       string
 }

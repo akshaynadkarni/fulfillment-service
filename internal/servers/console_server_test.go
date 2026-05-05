@@ -154,7 +154,7 @@ func newFakeHubClientFactory(client clnt.Client) HubClientFactory {
 }
 
 // newComputeInstanceCR creates a typed ComputeInstance CR for testing.
-func newComputeInstanceCR(id, namespace, vmNamespace, vmName string) *osacv1alpha1.ComputeInstance {
+func newComputeInstanceCR(id, namespace string, phase osacv1alpha1.ComputeInstancePhaseType) *osacv1alpha1.ComputeInstance {
 	obj := &osacv1alpha1.ComputeInstance{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "ci-" + id,
@@ -164,11 +164,8 @@ func newComputeInstanceCR(id, namespace, vmNamespace, vmName string) *osacv1alph
 			},
 		},
 	}
-	if vmNamespace != "" || vmName != "" {
-		obj.Status.VirtualMachineReference = &osacv1alpha1.VirtualMachineReferenceType{
-			Namespace:                  vmNamespace,
-			KubeVirtVirtualMachineName: vmName,
-		}
+	if phase != "" {
+		obj.Status.Phase = phase
 	}
 	return obj
 }
@@ -200,8 +197,8 @@ var _ = Describe("Console Server", func() {
 	})
 
 	// setupHubMock configures the hub server mock and creates a fake K8s client
-	// with a ComputeInstance CR that has a VM reference.
-	setupHubMock := func(instanceID, hubNamespace, vmNamespace, vmName string) clnt.Client {
+	// with a ComputeInstance CR in the given phase.
+	setupHubMock := func(instanceID, hubNamespace string, phase osacv1alpha1.ComputeInstancePhaseType) clnt.Client {
 		hubServer.getResponse = privatev1.HubsGetResponse_builder{
 			Object: privatev1.Hub_builder{
 				Id:         "hub-1",
@@ -209,7 +206,7 @@ var _ = Describe("Console Server", func() {
 				Namespace:  hubNamespace,
 			}.Build(),
 		}.Build()
-		cr := newComputeInstanceCR(instanceID, hubNamespace, vmNamespace, vmName)
+		cr := newComputeInstanceCR(instanceID, hubNamespace, phase)
 		return newFakeClient(cr)
 	}
 
@@ -327,7 +324,7 @@ var _ = Describe("Console Server", func() {
 				}.Build(),
 			}.Build()
 
-			fakeK8s = setupHubMock("ci-123", "test-ns", "vm-ns", "test-vm")
+			fakeK8s = setupHubMock("ci-123", "test-ns", osacv1alpha1.ComputeInstancePhaseRunning)
 			buildServer()
 
 			ctx := authpkg.ContextWithSubject(context.Background(), &authpkg.Subject{User: "testuser"})
@@ -395,7 +392,7 @@ var _ = Describe("Console Server", func() {
 			Expect(resp.GetReason()).To(ContainSubstring("not found on hub"))
 		})
 
-		It("should return unavailable when CR has no VM reference on hub", func() {
+		It("should return unavailable when CR is not running on hub", func() {
 			ciServer.getResponse = privatev1.ComputeInstancesGetResponse_builder{
 				Object: privatev1.ComputeInstance_builder{
 					Id: "ci-123",
@@ -406,8 +403,7 @@ var _ = Describe("Console Server", func() {
 				}.Build(),
 			}.Build()
 
-			// CR exists but without virtualMachineReference.
-			fakeK8s = setupHubMock("ci-123", "test-ns", "", "")
+			fakeK8s = setupHubMock("ci-123", "test-ns", osacv1alpha1.ComputeInstancePhaseStopped)
 			buildServer()
 
 			ctx := authpkg.ContextWithSubject(context.Background(), &authpkg.Subject{User: "testuser"})
@@ -417,7 +413,33 @@ var _ = Describe("Console Server", func() {
 			}.Build())
 			Expect(err).NotTo(HaveOccurred())
 			Expect(resp.GetAvailable()).To(BeFalse())
-			Expect(resp.GetReason()).To(ContainSubstring("no VM reference on hub"))
+			Expect(resp.GetReason()).To(ContainSubstring("not running on hub"))
+			Expect(resp.GetReason()).NotTo(ContainSubstring("provisioning"))
+		})
+
+		It("should include provisioning hint when CR is starting on hub", func() {
+			ciServer.getResponse = privatev1.ComputeInstancesGetResponse_builder{
+				Object: privatev1.ComputeInstance_builder{
+					Id: "ci-123",
+					Status: privatev1.ComputeInstanceStatus_builder{
+						State: privatev1.ComputeInstanceState_COMPUTE_INSTANCE_STATE_RUNNING,
+						Hub:   "hub-1",
+					}.Build(),
+				}.Build(),
+			}.Build()
+
+			fakeK8s = setupHubMock("ci-123", "test-ns", osacv1alpha1.ComputeInstancePhaseStarting)
+			buildServer()
+
+			ctx := authpkg.ContextWithSubject(context.Background(), &authpkg.Subject{User: "testuser"})
+			resp, err := server.GetAccess(ctx, publicv1.ConsoleGetAccessRequest_builder{
+				ResourceType: publicv1.ConsoleResourceType_CONSOLE_RESOURCE_TYPE_COMPUTE_INSTANCE,
+				ResourceId:   "ci-123",
+			}.Build())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(resp.GetAvailable()).To(BeFalse())
+			Expect(resp.GetReason()).To(ContainSubstring("not running on hub"))
+			Expect(resp.GetReason()).To(ContainSubstring("provisioning"))
 		})
 
 		It("should return unavailable when compute instance not found", func() {
@@ -561,7 +583,7 @@ var _ = Describe("Console Server", func() {
 				}.Build(),
 			}.Build()
 
-			fakeK8s = setupHubMock("ci-123", "test-ns", "vm-ns", "test-vm")
+			fakeK8s = setupHubMock("ci-123", "test-ns", osacv1alpha1.ComputeInstancePhaseRunning)
 			buildServer()
 
 			ctx, cancel := context.WithCancel(
@@ -633,7 +655,7 @@ var _ = Describe("Console Server", func() {
 				}.Build(),
 			}.Build()
 
-			fakeK8s = setupHubMock("ci-123", "test-ns", "vm-ns", "test-vm")
+			fakeK8s = setupHubMock("ci-123", "test-ns", osacv1alpha1.ComputeInstancePhaseRunning)
 			buildServer()
 
 			stream := newMockStream(authpkg.ContextWithSubject(context.Background(), &authpkg.Subject{User: "testuser"}))

@@ -21,7 +21,7 @@ import (
 	"golang.org/x/net/websocket"
 )
 
-// mockWSServer simulates a KubeVirt serial console subresource endpoint.
+// mockWSServer simulates the console subresource endpoint.
 // It accepts WebSocket connections and echoes data back with a configurable prefix.
 type mockWSServer struct {
 	listener   net.Listener
@@ -45,7 +45,7 @@ func newMockWSServer() (*mockWSServer, error) {
 	}
 
 	mux := http.NewServeMux()
-	mux.Handle("/apis/subresources.kubevirt.io/v1/namespaces/", websocket.Handler(m.handleConsole))
+	mux.Handle("/apis/console.osac.openshift.io/v1alpha1/namespaces/", websocket.Handler(m.handleConsole))
 
 	m.server = &http.Server{Handler: mux}
 	go m.server.Serve(listener)
@@ -63,7 +63,7 @@ func newMockWSServerWithHandler(handler func(ws *websocket.Conn)) (*mockWSServer
 	m := &mockWSServer{listener: listener}
 
 	mux := http.NewServeMux()
-	mux.Handle("/apis/subresources.kubevirt.io/v1/namespaces/", websocket.Handler(handler))
+	mux.Handle("/apis/console.osac.openshift.io/v1alpha1/namespaces/", websocket.Handler(handler))
 
 	m.server = &http.Server{Handler: mux}
 	go m.server.Serve(listener)

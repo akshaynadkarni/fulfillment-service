@@ -146,7 +146,7 @@ var _ = Describe("Manager", func() {
 				ResourceID:   "test-123",
 				HubID:        "hub-1",
 				Namespace:    "ns",
-				VMName:       "vm-1",
+				CRName:       "vm-1",
 			}
 
 			conn, err := mgr.Connect(ctx, target, "testuser")
