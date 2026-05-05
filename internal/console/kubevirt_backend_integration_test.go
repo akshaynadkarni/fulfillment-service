@@ -57,7 +57,7 @@ var _ = Describe("KubeVirt Backend Integration", func() {
 		conn, err := backend.Connect(ctx, Target{
 			HubID:     "hub-1",
 			Namespace: "test-ns",
-			VMName:    "test-vm",
+			CRName:    "test-vm",
 		})
 		Expect(err).NotTo(HaveOccurred())
 		defer conn.Close()
@@ -106,7 +106,7 @@ var _ = Describe("KubeVirt Backend Integration", func() {
 			ResourceID:   "ci-123",
 			HubID:        "hub-1",
 			Namespace:    "test-ns",
-			VMName:       "test-vm",
+			CRName:       "test-vm",
 		}, "testuser")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(mgr.ActiveSessions()).To(Equal(1))
@@ -160,7 +160,7 @@ var _ = Describe("KubeVirt Backend Integration", func() {
 		conn, err := backend.Connect(ctx, Target{
 			HubID:     "hub-1",
 			Namespace: "test-ns",
-			VMName:    "test-vm",
+			CRName:    "test-vm",
 		})
 		Expect(err).NotTo(HaveOccurred())
 
@@ -203,7 +203,7 @@ var _ = Describe("KubeVirt Backend Integration", func() {
 			ResourceID:   "ci-same",
 			HubID:        "hub-1",
 			Namespace:    "test-ns",
-			VMName:       "test-vm",
+			CRName:       "test-vm",
 		}
 
 		conn1, err := mgr.Connect(ctx, target, "user1")
@@ -248,7 +248,7 @@ var _ = Describe("KubeVirt Backend Integration", func() {
 		defer cancel()
 
 		conn, err := backend.Connect(ctx, Target{
-			HubID: "hub-1", Namespace: "test-ns", VMName: "test-vm",
+			HubID: "hub-1", Namespace: "test-ns", CRName: "test-vm",
 		})
 		Expect(err).NotTo(HaveOccurred())
 		defer conn.Close()
@@ -291,7 +291,7 @@ var _ = Describe("KubeVirt Backend Integration", func() {
 		defer cancel()
 
 		conn, err := backend.Connect(ctx, Target{
-			HubID: "hub-1", Namespace: "test-ns", VMName: "test-vm",
+			HubID: "hub-1", Namespace: "test-ns", CRName: "test-vm",
 		})
 		Expect(err).NotTo(HaveOccurred())
 		defer conn.Close()

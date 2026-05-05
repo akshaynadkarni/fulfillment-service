@@ -39,7 +39,8 @@ type KubeVirtBackendBuilder struct {
 	hubConfigProvider HubConfigProvider
 }
 
-// kubeVirtBackend connects to KubeVirt VirtualMachineInstance console subresource.
+// kubeVirtBackend connects to compute instance serial consoles on hub clusters
+// via the console.osac.openshift.io aggregated API.
 type kubeVirtBackend struct {
 	logger            *slog.Logger
 	hubConfigProvider HubConfigProvider
@@ -73,12 +74,12 @@ func (b *KubeVirtBackendBuilder) Build() (Backend, error) {
 	}, nil
 }
 
-// Connect opens a WebSocket connection to the KubeVirt serial console subresource.
+// Connect opens a WebSocket to the compute instance console subresource on the target hub.
 func (b *kubeVirtBackend) Connect(ctx context.Context, target Target) (io.ReadWriteCloser, error) {
-	b.logger.InfoContext(ctx, "Connecting to KubeVirt console",
+	b.logger.InfoContext(ctx, "Connecting to console",
 		slog.String("hub", target.HubID),
 		slog.String("namespace", target.Namespace),
-		slog.String("vm", target.VMName),
+		slog.String("compute_instance", target.CRName),
 	)
 
 	config, err := b.hubConfigProvider(ctx, target.HubID)
@@ -86,7 +87,7 @@ func (b *kubeVirtBackend) Connect(ctx context.Context, target Target) (io.ReadWr
 		return nil, fmt.Errorf("failed to get hub config for %q: %w", target.HubID, err)
 	}
 
-	// Build the WebSocket URL for the KubeVirt console subresource.
+	// Build the WebSocket URL for the console subresource.
 	host := config.Host
 	if !strings.Contains(host, "://") {
 		host = "https://" + host
@@ -102,9 +103,9 @@ func (b *kubeVirtBackend) Connect(ctx context.Context, target Target) (io.ReadWr
 	}
 
 	consolePath := fmt.Sprintf(
-		"/apis/subresources.kubevirt.io/v1/namespaces/%s/virtualmachineinstances/%s/console",
+		"/apis/console.osac.openshift.io/v1alpha1/namespaces/%s/computeinstances/%s/console",
 		url.PathEscape(target.Namespace),
-		url.PathEscape(target.VMName),
+		url.PathEscape(target.CRName),
 	)
 
 	wsURL := fmt.Sprintf("%s://%s%s", scheme, parsed.Host, consolePath)
@@ -149,16 +150,16 @@ func (b *kubeVirtBackend) Connect(ctx context.Context, target Target) (io.ReadWr
 
 	conn, err := websocket.DialConfig(wsConfig)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to KubeVirt console: %w", err)
+		return nil, fmt.Errorf("failed to connect to console: %w", err)
 	}
 
 	// Set binary mode for raw console I/O.
 	conn.PayloadType = websocket.BinaryFrame
 
-	b.logger.InfoContext(ctx, "Connected to KubeVirt console",
+	b.logger.InfoContext(ctx, "Connected to console",
 		slog.String("hub", target.HubID),
 		slog.String("namespace", target.Namespace),
-		slog.String("vm", target.VMName),
+		slog.String("compute_instance", target.CRName),
 	)
 
 	return conn, nil

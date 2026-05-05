@@ -70,7 +70,7 @@ var _ = Describe("KubeVirt Backend", func() {
 			_, err = backend.Connect(context.Background(), Target{
 				HubID:     "missing-hub",
 				Namespace: "test-ns",
-				VMName:    "test-vm",
+				CRName:    "test-cr",
 			})
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("missing-hub"))
@@ -94,7 +94,7 @@ var _ = Describe("KubeVirt Backend", func() {
 			_, err = backend.Connect(context.Background(), Target{
 				HubID:     "hub-1",
 				Namespace: "test-ns",
-				VMName:    "test-vm",
+				CRName:    "test-cr",
 			})
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("failed to connect"))

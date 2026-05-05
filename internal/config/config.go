@@ -233,6 +233,7 @@ func (c *Config) Connect(ctx context.Context, flags *pflag.FlagSet) (result *grp
 		SetCaPool(c.caPool).
 		SetTokenSource(tokenSource).
 		SetAddress(c.Address).
+		SetKeepAlive(10 * time.Second).
 		AddUnaryInterceptor(versionInterceptor.UnaryClient).
 		AddStreamInterceptor(versionInterceptor.StreamClient).
 		Build()

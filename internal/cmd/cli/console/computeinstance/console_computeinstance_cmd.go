@@ -221,10 +221,19 @@ func (c *runnerContext) connectWithRetry(ctx context.Context, instanceID string)
 }
 
 func (c *runnerContext) connectOnce(ctx context.Context, instanceID string) error {
+	// Each attempt gets its own context so that when connectOnce returns
+	// (on error or clean disconnect), the gRPC stream is explicitly cancelled
+	// and its resources are released. For an active HTTP/2 gRPC stream, this
+	// normally aborts the stream on the wire, instead of leaving the server-side
+	// session alive until the parent context is cancelled — which would block
+	// reconnection because the server enforces one session per resource.
+	streamCtx, streamCancel := context.WithCancel(ctx)
+	defer streamCancel()
+
 	client := publicv1.NewConsoleClient(c.conn)
 
 	// Open bidirectional stream.
-	stream, err := client.Connect(ctx)
+	stream, err := client.Connect(streamCtx)
 	if err != nil {
 		return fmt.Errorf("failed to open console stream: %w", err)
 	}
@@ -242,7 +251,7 @@ func (c *runnerContext) connectOnce(ctx context.Context, instanceID string) erro
 	}
 
 	// Wait for connected status.
-	if err := c.waitForConnected(ctx, stream, instanceID); err != nil {
+	if err := c.waitForConnected(streamCtx, stream, instanceID); err != nil {
 		return err
 	}
 
@@ -256,7 +265,7 @@ func (c *runnerContext) connectOnce(ctx context.Context, instanceID string) erro
 		defer term.Restore(fd, oldState)
 	}
 
-	err = c.proxyIO(ctx, stream)
+	err = c.proxyIO(streamCtx, stream)
 	if err != nil {
 		// We were connected and then lost the connection.
 		return fmt.Errorf("%w: %v", errConnectionLost, err)

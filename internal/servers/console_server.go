@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -202,7 +203,7 @@ func (s *consoleServer) Connect(stream publicv1.Console_ConnectServer) error {
 			slog.String("resource_id", resourceID),
 			slog.String("hub", target.HubID),
 			slog.String("namespace", target.Namespace),
-			slog.String("vm", target.VMName),
+			slog.String("compute_instance", target.CRName),
 			slog.Any("error", err),
 		)
 		return status.Errorf(codes.Internal, "failed to connect: %v", err)
@@ -245,7 +246,7 @@ func (s *consoleServer) proxy(ctx context.Context, stream publicv1.Console_Conne
 				}
 			}
 			if err != nil {
-				if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
+				if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) || errors.Is(err, context.Canceled) {
 					errCh <- nil
 				} else {
 					errCh <- fmt.Errorf("read from backend: %w", err)
@@ -260,7 +261,7 @@ func (s *consoleServer) proxy(ctx context.Context, stream publicv1.Console_Conne
 		for {
 			req, err := stream.Recv()
 			if err != nil {
-				if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
+				if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) || errors.Is(err, context.Canceled) {
 					errCh <- nil
 				} else {
 					errCh <- fmt.Errorf("recv from client: %w", err)
@@ -273,7 +274,11 @@ func (s *consoleServer) proxy(ctx context.Context, stream publicv1.Console_Conne
 				if len(data) > 0 {
 					_, writeErr := conn.Write(data)
 					if writeErr != nil {
-						errCh <- fmt.Errorf("write to backend: %w", writeErr)
+						if errors.Is(writeErr, net.ErrClosed) {
+							errCh <- nil
+						} else {
+							errCh <- fmt.Errorf("write to backend: %w", writeErr)
+						}
 						return
 					}
 				}
@@ -299,7 +304,7 @@ func (s *consoleServer) proxy(ctx context.Context, stream publicv1.Console_Conne
 	select {
 	case err := <-errCh:
 		if err != nil && ctx.Err() == nil {
-			s.logger.InfoContext(ctx, "Console proxy ended with error",
+			s.logger.WarnContext(ctx, "Console proxy error",
 				slog.Any("error", err),
 			)
 			return err
@@ -368,8 +373,8 @@ func (s *consoleServer) resolveComputeInstance(ctx context.Context, id string) (
 			"compute instance %q has no hub assigned", id)
 	}
 
-	// Query the hub cluster for the VM reference.
-	namespace, vmName, err := s.getVMReferenceFromHub(txCtx, hubID, id)
+	// Query the hub cluster for the ComputeInstance CR.
+	namespace, crName, err := s.getComputeInstanceFromHub(txCtx, hubID, id)
 	if err != nil {
 		return nil, err
 	}
@@ -379,13 +384,13 @@ func (s *consoleServer) resolveComputeInstance(ctx context.Context, id string) (
 		ResourceID:   id,
 		HubID:        hubID,
 		Namespace:    namespace,
-		VMName:       vmName,
+		CRName:       crName,
 	}, nil
 }
 
-// getVMReferenceFromHub queries the hub cluster for the ComputeInstance CR
-// matching the given instance ID, and extracts the VM reference from its status.
-func (s *consoleServer) getVMReferenceFromHub(ctx context.Context, hubID, instanceID string) (namespace, vmName string, err error) {
+// getComputeInstanceFromHub queries the hub cluster for the ComputeInstance CR
+// matching the given instance ID, and returns its namespace and name.
+func (s *consoleServer) getComputeInstanceFromHub(ctx context.Context, hubID, instanceID string) (namespace, crName string, err error) {
 	// Get the hub's kubeconfig.
 	hubResp, err := s.hubServer.Get(ctx, privatev1.HubsGetRequest_builder{
 		Id: hubID,
@@ -433,30 +438,25 @@ func (s *consoleServer) getVMReferenceFromHub(ctx context.Context, hubID, instan
 		return
 	}
 
-	// Extract virtualMachineReference from the CR status.
 	obj := items[0]
-	vmRef := obj.Status.VirtualMachineReference
-	if vmRef == nil {
-		s.logger.WarnContext(ctx, "Running compute instance has no VM reference on hub",
+	if obj.Status.Phase != osacv1alpha1.ComputeInstancePhaseRunning {
+		phase := string(obj.Status.Phase)
+		s.logger.WarnContext(ctx, "Compute instance is not running on hub",
 			slog.String("instance_id", instanceID),
 			slog.String("hub_id", hubID),
 			slog.String("cr_name", obj.GetName()),
+			slog.String("phase", phase),
 		)
-		err = status.Errorf(codes.FailedPrecondition,
-			"compute instance %q has no VM reference on hub; it may still be provisioning", instanceID)
+		msg := fmt.Sprintf(
+			"compute instance %q is not running on hub %q (phase: %s)",
+			instanceID, hubID, phase)
+		if obj.Status.Phase == osacv1alpha1.ComputeInstancePhaseStarting {
+			msg += "; it may still be provisioning"
+		}
+		err = status.Errorf(codes.FailedPrecondition, "%s", msg)
 		return
 	}
-
-	namespace = vmRef.Namespace
-	vmName = vmRef.KubeVirtVirtualMachineName
-	if namespace == "" || vmName == "" {
-		err = status.Errorf(codes.FailedPrecondition,
-			"compute instance %q has incomplete VM reference on hub (namespace=%q, vmName=%q)",
-			instanceID, namespace, vmName)
-		return
-	}
-
-	return
+	return obj.GetNamespace(), obj.GetName(), nil
 }
 
 // GetAccess checks console availability for a resource.

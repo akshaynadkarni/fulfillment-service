@@ -90,6 +90,10 @@ data:
                   "@type": type.googleapis.com/envoy.extensions.access_loggers.file.v3.FileAccessLog
                   path: /dev/stdout
               stat_prefix: external-api
+              http2_protocol_options:
+                connection_keepalive:
+                  interval: 30s
+                  timeout: 30s
               route_config:
                 name: backend
                 virtual_hosts:
@@ -126,6 +130,18 @@ data:
                     match:
                       safe_regex:
                         regex: /osac\.public\..*/Watch
+                    route:
+                      cluster: grpc-server
+                      timeout: 0s
+                      idle_timeout: 0s
+
+                  # This route is for the Console.Connect bidirectional stream. Like Watch streams,
+                  # console sessions are long-lived and must not be subject to the default request
+                  # timeout. The CLI enforces its own 30-minute session timeout.
+                  - name: console
+                    match:
+                      safe_regex:
+                        regex: /osac\.public\..*Console/Connect
                     route:
                       cluster: grpc-server
                       timeout: 0s
@@ -180,6 +196,10 @@ data:
                   "@type": type.googleapis.com/envoy.extensions.access_loggers.file.v3.FileAccessLog
                   path: /dev/stdout
               stat_prefix: internal-api
+              http2_protocol_options:
+                connection_keepalive:
+                  interval: 30s
+                  timeout: 30s
               route_config:
                 name: backend
                 virtual_hosts:
@@ -214,6 +234,16 @@ data:
                     match:
                       safe_regex:
                         regex: .*/Watch
+                    route:
+                      cluster: grpc-server
+                      timeout: 0s
+                      idle_timeout: 0s
+
+                  # This route is for the Console.Connect bidirectional stream.
+                  - name: console
+                    match:
+                      safe_regex:
+                        regex: /osac\.public\..*Console/Connect
                     route:
                       cluster: grpc-server
                       timeout: 0s

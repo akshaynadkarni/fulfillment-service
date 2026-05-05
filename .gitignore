@@ -11,3 +11,5 @@
 /fulfillment-service
 /logs
 __debug_bin*
+.idea
+.vscode
