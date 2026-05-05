@@ -11,14 +11,13 @@ Unless required by applicable law or agreed to in writing, software distributed 
 language governing permissions and limitations under the License.
 */
 
-package publicip
+package publicipattachment
 
 import (
 	"fmt"
 	"log/slog"
 
 	"github.com/spf13/cobra"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	publicv1 "github.com/osac-project/fulfillment-service/internal/api/osac/public/v1"
@@ -30,31 +29,22 @@ import (
 func Cmd() *cobra.Command {
 	runner := &runnerContext{}
 	result := &cobra.Command{
-		Use:     "publicip [flags]",
-		Aliases: []string{string(proto.MessageName((*publicv1.PublicIP)(nil)))},
-		Short:   "Detach a public IP from its compute instance",
+		Use:   "publicipattachment PUBLIC_IP",
+		Short: "Detach a public IP from its compute instance",
 		Long: "Detach an existing public IP from the compute instance it is currently attached to. " +
-			"The --publicip flag is required.",
-		Example: `  # Detach a public IP by ID
-  osac detach publicip --publicip pip-abc123`,
-		Args: cobra.NoArgs,
+			"The public IP is identified by its ID or name.",
+		Example: `  # Detach a public IP by name
+  osac delete publicipattachment my-ip
+
+  # Detach a public IP by ID
+  osac delete publicipattachment pip-abc123`,
+		Args: cobra.ExactArgs(1),
 		RunE: runner.run,
 	}
-	flags := result.Flags()
-	flags.StringVar(
-		&runner.args.publicIP,
-		"publicip",
-		"",
-		"ID of the public IP to detach.",
-	)
-	result.MarkFlagRequired("publicip") //nolint:errcheck
 	return result
 }
 
 type runnerContext struct {
-	args struct {
-		publicIP string
-	}
 	logger  *slog.Logger
 	console *terminal.Console
 }
@@ -81,18 +71,16 @@ func (c *runnerContext) run(cmd *cobra.Command, args []string) error {
 
 	client := publicv1.NewPublicIPsClient(conn)
 
-	// Fetch the public IP by ID:
 	getResponse, err := client.Get(ctx, publicv1.PublicIPsGetRequest_builder{
-		Id: c.args.publicIP,
+		Id: args[0],
 	}.Build())
 	if err != nil {
-		return fmt.Errorf("failed to get public IP '%s': %w", c.args.publicIP, err)
+		return fmt.Errorf("failed to get public IP '%s': %w", args[0], err)
 	}
 
 	pip := getResponse.GetObject()
-
-	// Detach by clearing spec.compute_instance and updating with a field mask:
 	pip.GetSpec().ClearComputeInstance()
+
 	response, err := client.Update(ctx, publicv1.PublicIPsUpdateRequest_builder{
 		Object: pip,
 		UpdateMask: &fieldmaskpb.FieldMask{

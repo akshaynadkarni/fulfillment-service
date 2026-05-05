@@ -11,14 +11,13 @@ Unless required by applicable law or agreed to in writing, software distributed 
 language governing permissions and limitations under the License.
 */
 
-package publicip
+package publicipattachment
 
 import (
 	"fmt"
 	"log/slog"
 
 	"github.com/spf13/cobra"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	publicv1 "github.com/osac-project/fulfillment-service/internal/api/osac/public/v1"
@@ -30,13 +29,15 @@ import (
 func Cmd() *cobra.Command {
 	runner := &runnerContext{}
 	result := &cobra.Command{
-		Use:     "publicip [flags]",
-		Aliases: []string{string(proto.MessageName((*publicv1.PublicIP)(nil)))},
-		Short:   "Attach a public IP to a compute instance",
-		Long: "Attach an existing public IP to a compute instance. " +
+		Use:   "publicipattachment [flags]",
+		Short: "Attach a public IP to a compute instance",
+		Long: "Attach an existing public IP to a compute instance by setting spec.compute_instance. " +
 			"Both --publicip and --compute-instance flags are required.",
 		Example: `  # Attach a public IP to a compute instance
-  osac attach publicip --publicip pip-abc123 --compute-instance ci-xyz789`,
+  osac create publicipattachment --publicip my-ip --compute-instance my-vm
+
+  # Attach using IDs
+  osac create publicipattachment --publicip pip-abc123 --compute-instance ci-xyz789`,
 		Args: cobra.NoArgs,
 		RunE: runner.run,
 	}
@@ -51,7 +52,7 @@ func Cmd() *cobra.Command {
 		&runner.args.computeInstance,
 		"compute-instance",
 		"",
-		"ID of the ComputeInstance to attach the public IP to.",
+		"ID of the compute instance to attach the public IP to.",
 	)
 	result.MarkFlagRequired("publicip")         //nolint:errcheck
 	result.MarkFlagRequired("compute-instance") //nolint:errcheck
@@ -89,7 +90,6 @@ func (c *runnerContext) run(cmd *cobra.Command, args []string) error {
 
 	client := publicv1.NewPublicIPsClient(conn)
 
-	// Fetch the public IP by ID:
 	getResponse, err := client.Get(ctx, publicv1.PublicIPsGetRequest_builder{
 		Id: c.args.publicIP,
 	}.Build())
@@ -98,9 +98,8 @@ func (c *runnerContext) run(cmd *cobra.Command, args []string) error {
 	}
 
 	pip := getResponse.GetObject()
-
-	// Attach by setting spec.compute_instance and updating with a field mask:
 	pip.GetSpec().SetComputeInstance(c.args.computeInstance)
+
 	response, err := client.Update(ctx, publicv1.PublicIPsUpdateRequest_builder{
 		Object: pip,
 		UpdateMask: &fieldmaskpb.FieldMask{

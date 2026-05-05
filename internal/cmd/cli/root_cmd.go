@@ -22,11 +22,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/osac-project/fulfillment-service/internal/cmd/cli/annotate"
-	"github.com/osac-project/fulfillment-service/internal/cmd/cli/attach"
 	"github.com/osac-project/fulfillment-service/internal/cmd/cli/console"
 	"github.com/osac-project/fulfillment-service/internal/cmd/cli/create"
 	"github.com/osac-project/fulfillment-service/internal/cmd/cli/delete"
-	"github.com/osac-project/fulfillment-service/internal/cmd/cli/detach"
 	"github.com/osac-project/fulfillment-service/internal/cmd/cli/describe"
 	"github.com/osac-project/fulfillment-service/internal/cmd/cli/edit"
 	"github.com/osac-project/fulfillment-service/internal/cmd/cli/get"
@@ -54,11 +52,9 @@ func Root() *cobra.Command {
 
 	// Add commands:
 	result.AddCommand(annotate.Cmd())
-	result.AddCommand(attach.Cmd())
 	result.AddCommand(console.Cmd())
 	result.AddCommand(create.Cmd())
 	result.AddCommand(delete.Cmd())
-	result.AddCommand(detach.Cmd())
 	result.AddCommand(describe.Cmd())
 	result.AddCommand(edit.Cmd())
 	result.AddCommand(get.Cmd())
