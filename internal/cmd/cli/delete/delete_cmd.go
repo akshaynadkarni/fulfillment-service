@@ -27,7 +27,6 @@ import (
 	grpcstatus "google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/osac-project/fulfillment-service/internal/cmd/cli/delete/publicip"
 	"github.com/osac-project/fulfillment-service/internal/config"
 	"github.com/osac-project/fulfillment-service/internal/exit"
 	"github.com/osac-project/fulfillment-service/internal/logging"
@@ -45,7 +44,6 @@ func Cmd() *cobra.Command {
 		Short: "Delete objects",
 		RunE:  runner.run,
 	}
-	result.AddCommand(publicip.Cmd())
 	return result
 }
 

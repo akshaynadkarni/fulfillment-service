@@ -19,6 +19,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	publicv1 "github.com/osac-project/fulfillment-service/internal/api/osac/public/v1"
 	"github.com/osac-project/fulfillment-service/internal/config"
@@ -31,37 +32,36 @@ func Cmd() *cobra.Command {
 	result := &cobra.Command{
 		Use:     "publicip [flags]",
 		Aliases: []string{string(proto.MessageName((*publicv1.PublicIP)(nil)))},
-		Short:   "Create a public IP",
-		Long:    "Allocate a public IP address from an existing PublicIPPool.",
-		Example: `  # Create a public IP from a pool
-  osac create publicip --name my-ip --pool pool-abc123`,
+		Short:   "Attach a public IP to a compute instance",
+		Long: "Attach an existing public IP to a compute instance. " +
+			"Both --publicip and --compute-instance flags are required.",
+		Example: `  # Attach a public IP to a compute instance
+  osac attach publicip --publicip pip-abc123 --compute-instance ci-xyz789`,
 		Args: cobra.NoArgs,
 		RunE: runner.run,
 	}
 	flags := result.Flags()
-	flags.StringVarP(
-		&runner.args.name,
-		"name",
-		"n",
+	flags.StringVar(
+		&runner.args.publicIP,
+		"publicip",
 		"",
-		"Name of the public IP.",
+		"ID of the public IP to attach.",
 	)
 	flags.StringVar(
-		&runner.args.pool,
-		"pool",
+		&runner.args.computeInstance,
+		"compute-instance",
 		"",
-		"ID of the parent PublicIPPool to allocate the address from.",
+		"ID of the ComputeInstance to attach the public IP to.",
 	)
-	result.MarkFlagRequired("pool") //nolint:errcheck
-	// Note: attaching a compute instance at creation time (via --compute-instance flag) is future
-	// scope. To attach a public IP to a compute instance, use 'osac attach publicip'.
+	result.MarkFlagRequired("publicip")         //nolint:errcheck
+	result.MarkFlagRequired("compute-instance") //nolint:errcheck
 	return result
 }
 
 type runnerContext struct {
 	args struct {
-		name string
-		pool string
+		publicIP        string
+		computeInstance string
 	}
 	logger  *slog.Logger
 	console *terminal.Console
@@ -89,20 +89,30 @@ func (c *runnerContext) run(cmd *cobra.Command, args []string) error {
 
 	client := publicv1.NewPublicIPsClient(conn)
 
-	spec := publicv1.PublicIPSpec_builder{
-		Pool: c.args.pool,
-	}
-	publicIP := publicv1.PublicIP_builder{
-		Metadata: publicv1.Metadata_builder{Name: c.args.name}.Build(),
-		Spec:     spec.Build(),
-	}.Build()
-
-	response, err := client.Create(ctx, publicv1.PublicIPsCreateRequest_builder{Object: publicIP}.Build())
+	// Fetch the public IP by ID:
+	getResponse, err := client.Get(ctx, publicv1.PublicIPsGetRequest_builder{
+		Id: c.args.publicIP,
+	}.Build())
 	if err != nil {
-		return fmt.Errorf("failed to create public IP: %w", err)
+		return fmt.Errorf("failed to get public IP '%s': %w", c.args.publicIP, err)
 	}
 
-	c.console.Infof(ctx, "Created public IP '%s' (ID: %s).\n", response.Object.GetMetadata().GetName(), response.Object.GetId())
+	pip := getResponse.GetObject()
+
+	// Attach by setting spec.compute_instance and updating with a field mask:
+	pip.GetSpec().SetComputeInstance(c.args.computeInstance)
+	response, err := client.Update(ctx, publicv1.PublicIPsUpdateRequest_builder{
+		Object: pip,
+		UpdateMask: &fieldmaskpb.FieldMask{
+			Paths: []string{"spec.compute_instance"},
+		},
+	}.Build())
+	if err != nil {
+		return fmt.Errorf("failed to attach public IP: %w", err)
+	}
+
+	c.console.Infof(ctx, "Attached public IP '%s' to compute instance '%s'.\n",
+		response.GetObject().GetId(), c.args.computeInstance)
 
 	return nil
 }
