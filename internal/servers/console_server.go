@@ -164,10 +164,12 @@ func (s *consoleServer) Connect(stream publicv1.Console_ConnectServer) error {
 
 	resourceType := init.GetResourceType()
 	resourceID := init.GetResourceId()
+	clientID := init.GetClientId()
 
 	s.logger.InfoContext(ctx, "Console connect request",
 		slog.String("resource_type", resourceType.String()),
 		slog.String("resource_id", resourceID),
+		slog.String("client_id", clientID),
 	)
 
 	// Resolve the resource to a target.
@@ -192,7 +194,7 @@ func (s *consoleServer) Connect(stream publicv1.Console_ConnectServer) error {
 	}
 
 	// Open the backend connection.
-	conn, err := s.manager.Connect(ctx, *target, user)
+	conn, err := s.manager.Connect(ctx, *target, user, clientID)
 	if err != nil {
 		var sessionErr *console.ErrSessionExists
 		if errors.As(err, &sessionErr) {
@@ -310,14 +312,20 @@ func (s *consoleServer) proxy(ctx context.Context, stream publicv1.Console_Conne
 			return err
 		}
 		if ctx.Err() != nil {
-			s.logger.InfoContext(ctx, "Console session timed out")
-			// Send a status message before returning, best-effort.
-			_ = stream.Send(publicv1.ConsoleConnectResponse_builder{
-				Status: publicv1.ConsoleStatus_builder{
-					State:   publicv1.ConsoleConnectionState_CONSOLE_CONNECTION_STATE_DISCONNECTED,
-					Message: "Session timed out",
-				}.Build(),
-			}.Build())
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				s.logger.InfoContext(ctx, "Console session timed out")
+				// Send a status message before returning, best-effort.
+				_ = stream.Send(publicv1.ConsoleConnectResponse_builder{
+					Status: publicv1.ConsoleStatus_builder{
+						State:   publicv1.ConsoleConnectionState_CONSOLE_CONNECTION_STATE_DISCONNECTED,
+						Message: "Session timed out",
+					}.Build(),
+				}.Build())
+			} else {
+				s.logger.InfoContext(ctx, "Console session ended",
+					slog.String("reason", ctx.Err().Error()),
+				)
+			}
 		}
 		return nil
 	}

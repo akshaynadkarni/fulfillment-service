@@ -107,7 +107,7 @@ var _ = Describe("KubeVirt Backend Integration", func() {
 			HubID:        "hub-1",
 			Namespace:    "test-ns",
 			CRName:       "test-vm",
-		}, "testuser")
+		}, "testuser", "")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(mgr.ActiveSessions()).To(Equal(1))
 		defer conn.Close()
@@ -206,18 +206,18 @@ var _ = Describe("KubeVirt Backend Integration", func() {
 			CRName:       "test-vm",
 		}
 
-		conn1, err := mgr.Connect(ctx, target, "user1")
+		conn1, err := mgr.Connect(ctx, target, "user1", "")
 		Expect(err).NotTo(HaveOccurred())
 		defer conn1.Close()
 
 		// Second connection to same resource should fail.
-		_, err = mgr.Connect(ctx, target, "user2")
+		_, err = mgr.Connect(ctx, target, "user2", "")
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("already has an active console session"))
 
 		// After closing first, second should succeed.
 		conn1.Close()
-		conn2, err := mgr.Connect(ctx, target, "user2")
+		conn2, err := mgr.Connect(ctx, target, "user2", "")
 		Expect(err).NotTo(HaveOccurred())
 		conn2.Close()
 	})
