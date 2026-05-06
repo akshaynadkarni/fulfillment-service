@@ -53,9 +53,10 @@ type Config struct {
 	// - Controller: 30003
 	Debug bool `json:"debug" envconfig:"debug" default:"false"`
 
-	// ClientSecret indicates the client secret that will be used for the service accounts that will be created. If
-	// not specified then a random secret will be generated.
-	ClientSecret string `json:"client_secret" envconfig:"client_secret" default:""`
+	// Secret is the secret used in all places where passwords or secrets are needed, such as service account
+	// client secrets and user passwords. If the environment variable is set then that value will be used, otherwise
+	// a random one will be generated.
+	Secret string `json:"secret" envconfig:"secret" default:""`
 }
 
 var (
@@ -97,7 +98,7 @@ var _ = BeforeSuite(func() {
 		slog.Bool("keep_service", config.KeepService),
 		slog.String("deploy_mode", config.DeployMode),
 		slog.Bool("debug", config.Debug),
-		slog.String("!client_secret", config.ClientSecret),
+		slog.String("!secret", config.Secret),
 	)
 
 	// Debug mode isn't compatible with the Kustomize deployment mode:
@@ -115,7 +116,7 @@ var _ = BeforeSuite(func() {
 		SetKeepService(config.KeepService).
 		SetDeployMode(config.DeployMode).
 		SetDebug(config.Debug).
-		SetClientSecret(config.ClientSecret).
+		SetSecret(config.Secret).
 		AddCrdFile(filepath.Join("crds", "clusterorders.osac.openshift.io.yaml")).
 		AddCrdFile(filepath.Join("crds", "hostedclusters.hypershift.openshift.io.yaml")).
 		Build()
