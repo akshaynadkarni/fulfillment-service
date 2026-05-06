@@ -38,9 +38,9 @@ type Client struct {
 	logger     *slog.Logger
 	httpClient *apiclient.Client
 
-	// realm-management client UUIDs by organization name
-	realmManagementUUIDs map[string]string
-	mu                   sync.RWMutex
+	realmName               string
+	realmManagementClientID string
+	mu                      sync.RWMutex
 }
 
 // ClientBuilder builds a Keycloak client.
@@ -50,6 +50,7 @@ type ClientBuilder struct {
 	tokenSource auth.TokenSource
 	caPool      *x509.CertPool
 	httpClient  *http.Client
+	realmName   string
 }
 
 // Ensure Client implements idp.Client at compile time
@@ -75,6 +76,13 @@ func (b *ClientBuilder) SetBaseURL(value string) *ClientBuilder {
 // SetTokenSource sets the token source for authentication.
 func (b *ClientBuilder) SetTokenSource(value auth.TokenSource) *ClientBuilder {
 	b.tokenSource = value
+	return b
+}
+
+// SetRealmName sets the realm name.
+// If not set, the default realm name is "osac".
+func (b *ClientBuilder) SetRealmName(value string) *ClientBuilder {
+	b.realmName = value
 	return b
 }
 
@@ -104,6 +112,9 @@ func (b *ClientBuilder) Build() (result *Client, err error) {
 		err = errors.New("token source is mandatory")
 		return
 	}
+	if b.realmName == "" {
+		b.realmName = "osac"
+	}
 
 	// Build the underlying HTTP client
 	httpClientBuilder := apiclient.NewClient().
@@ -124,18 +135,18 @@ func (b *ClientBuilder) Build() (result *Client, err error) {
 	}
 
 	result = &Client{
-		logger:               b.logger,
-		httpClient:           httpClient,
-		realmManagementUUIDs: make(map[string]string),
+		logger:     b.logger,
+		httpClient: httpClient,
+		realmName:  b.realmName,
 	}
 	return
 }
 
-// CreateOrganization creates a new organization (Keycloak realm).
+// CreateOrganization creates a new organization (Keycloak organization in the configured realm).
 // Returns the created organization with server-assigned ID and any server defaults.
 func (c *Client) CreateOrganization(ctx context.Context, org *idp.Organization) (*idp.Organization, error) {
-	kcRealm := toKeycloakRealm(org)
-	response, err := c.httpClient.DoRequest(ctx, http.MethodPost, "/admin/realms", kcRealm)
+	kcOrg := toKeycloakOrganization(org)
+	response, err := c.httpClient.DoRequest(ctx, http.MethodPost, fmt.Sprintf("/admin/realms/%s/organizations", c.realmName), kcOrg)
 	if err != nil {
 		var apiErr *apiclient.APIError
 		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusConflict {
@@ -145,49 +156,33 @@ func (c *Client) CreateOrganization(ctx context.Context, org *idp.Organization) 
 	}
 	response.Body.Close()
 
-	// After creating a new realm, refresh the token so that subsequent requests
-	// have access to the newly created realm. The current token was issued before
-	// the realm existed and doesn't contain resource_access for the new realm.
-	if err := c.httpClient.RefreshToken(ctx); err != nil {
-		c.logger.WarnContext(ctx, "Failed to refresh token after creating organization",
-			slog.String("organization", org.Name),
-			slog.Any("error", err),
-		)
-	}
-
-	// Keycloak's POST /admin/realms returns 201 with no body, so we fetch the created realm
-	// to get the server-assigned ID and verify the realm was actually created
+	// Keycloak's POST /admin/realms returns 201 with no body, so we fetch the created organization
+	// to get the server-assigned ID and verify the organization was actually created
 	return c.GetOrganization(ctx, org.Name)
 }
 
-// GetOrganization retrieves an organization (Keycloak realm) by name.
+// GetOrganization retrieves an organization (Keycloak organization in the configured realm) by name.
 func (c *Client) GetOrganization(ctx context.Context, name string) (*idp.Organization, error) {
-	response, err := c.httpClient.DoRequest(ctx, http.MethodGet, fmt.Sprintf("/admin/realms/%s", url.PathEscape(name)), nil)
+	response, err := c.httpClient.DoRequest(ctx, http.MethodGet, fmt.Sprintf("/admin/realms/%s/organizations/%s", c.realmName, url.PathEscape(name)), nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get organization: %w", err)
 	}
 	defer response.Body.Close()
 
-	var kcRealm keycloakRealm
-	if err = json.NewDecoder(response.Body).Decode(&kcRealm); err != nil {
+	var kcOrg keycloakOrganization
+	if err = json.NewDecoder(response.Body).Decode(&kcOrg); err != nil {
 		return nil, fmt.Errorf("failed to decode organization response: %w", err)
 	}
-	return fromKeycloakRealm(&kcRealm), nil
+	return fromKeycloakOrganization(&kcOrg), nil
 }
 
-// DeleteOrganization deletes an organization (Keycloak realm) by name.
+// DeleteOrganization deletes an organization (Keycloak organization in the configured realm) by name.
 func (c *Client) DeleteOrganization(ctx context.Context, organizationName string) error {
-	response, err := c.httpClient.DoRequest(ctx, http.MethodDelete, fmt.Sprintf("/admin/realms/%s", url.PathEscape(organizationName)), nil)
+	response, err := c.httpClient.DoRequest(ctx, http.MethodDelete, fmt.Sprintf("/admin/realms/%s/organizations/%s", c.realmName, url.PathEscape(organizationName)), nil)
 	if err != nil {
 		return fmt.Errorf("failed to delete organization: %w", err)
 	}
 	defer response.Body.Close()
-
-	// Clear cached realm-management UUID for this organization to prevent stale data
-	// if the organization is recreated later
-	c.mu.Lock()
-	delete(c.realmManagementUUIDs, organizationName)
-	c.mu.Unlock()
 
 	return nil
 }
@@ -196,7 +191,7 @@ func (c *Client) DeleteOrganization(ctx context.Context, organizationName string
 // Returns the created user with ID populated.
 func (c *Client) CreateUser(ctx context.Context, organizationName string, user *idp.User) (*idp.User, error) {
 	kcUser := toKeycloakUser(user)
-	response, err := c.httpClient.DoRequest(ctx, http.MethodPost, fmt.Sprintf("/admin/realms/%s/users", url.PathEscape(organizationName)), kcUser)
+	response, err := c.httpClient.DoRequest(ctx, http.MethodPost, fmt.Sprintf("/admin/realms/%s/organizations/%s/users", c.realmName, url.PathEscape(organizationName)), kcUser)
 	if err != nil {
 		var apiErr *apiclient.APIError
 		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusConflict {
@@ -207,7 +202,7 @@ func (c *Client) CreateUser(ctx context.Context, organizationName string, user *
 	defer response.Body.Close()
 
 	// Extract user ID from Location header
-	// Location format: https://keycloak.example.com/admin/realms/{realm}/users/{user-id}
+	// Location format: https://keycloak.example.com/admin/realms/{realm}/organizations/{organization-name}/users/{user-id}
 	location := response.Header.Get("Location")
 	if location == "" {
 		return nil, fmt.Errorf("Location header not present in create user response")
@@ -244,7 +239,7 @@ func (c *Client) CreateUser(ctx context.Context, organizationName string, user *
 
 // GetUser retrieves a user by ID.
 func (c *Client) GetUser(ctx context.Context, organizationName, userID string) (*idp.User, error) {
-	response, err := c.httpClient.DoRequest(ctx, http.MethodGet, fmt.Sprintf("/admin/realms/%s/users/%s", url.PathEscape(organizationName), url.PathEscape(userID)), nil)
+	response, err := c.httpClient.DoRequest(ctx, http.MethodGet, fmt.Sprintf("/admin/realms/%s/organizations/%s/users/%s", c.realmName, url.PathEscape(organizationName), url.PathEscape(userID)), nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user: %w", err)
 	}
@@ -271,7 +266,8 @@ func (c *Client) ListUsers(ctx context.Context, organizationName string) ([]*idp
 		}
 
 		// Fetch one page of users
-		path := fmt.Sprintf("/admin/realms/%s/users?first=%d&max=%d",
+		path := fmt.Sprintf("/admin/realms/%s/organizations/%s/users?first=%d&max=%d",
+			c.realmName,
 			url.PathEscape(organizationName), first, maxPerPage)
 
 		response, err := c.httpClient.DoRequest(ctx, http.MethodGet, path, nil)
@@ -304,9 +300,9 @@ func (c *Client) ListUsers(ctx context.Context, organizationName string) ([]*idp
 	return allUsers, nil
 }
 
-// DeleteUser deletes a user by ID.
-func (c *Client) DeleteUser(ctx context.Context, organizationName, userID string) error {
-	response, err := c.httpClient.DoRequest(ctx, http.MethodDelete, fmt.Sprintf("/admin/realms/%s/users/%s", url.PathEscape(organizationName), url.PathEscape(userID)), nil)
+// DeleteUserFromOrganization deletes a user by ID from an organization.
+func (c *Client) DeleteUserFromOrganization(ctx context.Context, organizationName, userID string) error {
+	response, err := c.httpClient.DoRequest(ctx, http.MethodDelete, fmt.Sprintf("/admin/realms/%s/organizations/%s/users/%s", c.realmName, url.PathEscape(organizationName), url.PathEscape(userID)), nil)
 	if err != nil {
 		var apiErr *apiclient.APIError
 		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound {
@@ -318,9 +314,19 @@ func (c *Client) DeleteUser(ctx context.Context, organizationName, userID string
 	return nil
 }
 
+// DeleteUser deletes a user by ID from the realm.
+func (c *Client) DeleteUser(ctx context.Context, organizationName, userID string) error {
+	response, err := c.httpClient.DoRequest(ctx, http.MethodDelete, fmt.Sprintf("/admin/realms/%s/users/%s", c.realmName, url.PathEscape(userID)), nil)
+	if err != nil {
+		return fmt.Errorf("failed to delete user: %w", err)
+	}
+	defer response.Body.Close()
+	return nil
+}
+
 // ListOrganizationRoles lists all organization-level (realm) roles.
 func (c *Client) ListOrganizationRoles(ctx context.Context, organizationName string) ([]*idp.Role, error) {
-	response, err := c.httpClient.DoRequest(ctx, http.MethodGet, fmt.Sprintf("/admin/realms/%s/roles", url.PathEscape(organizationName)), nil)
+	response, err := c.httpClient.DoRequest(ctx, http.MethodGet, fmt.Sprintf("/admin/realms/%s/organizations/%s/roles", c.realmName, url.PathEscape(organizationName)), nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list realm roles: %w", err)
 	}
@@ -345,12 +351,12 @@ func (c *Client) ListOrganizationRoles(ctx context.Context, organizationName str
 //   - Internal UUID: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 func (c *Client) ListClientRoles(ctx context.Context, organizationName, clientID string) ([]*idp.Role, error) {
 	// Resolve to internal UUID
-	internalID, err := c.GetClientByClientID(ctx, organizationName, clientID)
+	internalID, err := c.GetRealmClientByClientID(ctx, clientID, c.realmName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve client ID: %w", err)
 	}
 
-	response, err := c.httpClient.DoRequest(ctx, http.MethodGet, fmt.Sprintf("/admin/realms/%s/clients/%s/roles", url.PathEscape(organizationName), url.PathEscape(internalID)), nil)
+	response, err := c.httpClient.DoRequest(ctx, http.MethodGet, fmt.Sprintf("/admin/realms/%s/clients/%s/roles", c.realmName, url.PathEscape(internalID)), nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list client roles: %w", err)
 	}
@@ -390,7 +396,7 @@ func (c *Client) AssignOrganizationRolesToUser(ctx context.Context, organization
 //   - Internal UUID: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 func (c *Client) AssignClientRolesToUser(ctx context.Context, organizationName, userID, clientID string, roles []*idp.Role) error {
 	// Resolve to internal UUID
-	internalID, err := c.GetClientByClientID(ctx, organizationName, clientID)
+	internalID, err := c.GetRealmClientByClientID(ctx, clientID, c.realmName)
 	if err != nil {
 		return fmt.Errorf("failed to resolve client ID: %w", err)
 	}
@@ -400,7 +406,7 @@ func (c *Client) AssignClientRolesToUser(ctx context.Context, organizationName, 
 		kcRoles[i] = *toKeycloakRole(role)
 	}
 
-	response, err := c.httpClient.DoRequest(ctx, http.MethodPost, fmt.Sprintf("/admin/realms/%s/users/%s/role-mappings/clients/%s", url.PathEscape(organizationName), url.PathEscape(userID), url.PathEscape(internalID)), kcRoles)
+	response, err := c.httpClient.DoRequest(ctx, http.MethodPost, fmt.Sprintf("/admin/realms/%s/users/%s/role-mappings/clients/%s", c.realmName, url.PathEscape(userID), url.PathEscape(internalID)), kcRoles)
 	if err != nil {
 		return fmt.Errorf("failed to assign client roles to user: %w", err)
 	}
@@ -408,14 +414,20 @@ func (c *Client) AssignClientRolesToUser(ctx context.Context, organizationName, 
 	return nil
 }
 
-// RemoveOrganizationRolesFromUser removes organization-level (realm) roles from a user.
+// RemoveOrganizationRolesFromUser removes organization-level roles from a user.
 func (c *Client) RemoveOrganizationRolesFromUser(ctx context.Context, organizationName, userID string, roles []*idp.Role) error {
+	// TODO: implement function
+	return nil
+}
+
+// RemoveRealmRolesFromUser removes realm-level roles from a user.
+func (c *Client) RemoveRealmRolesFromUser(ctx context.Context, userID string, roles []*idp.Role) error {
 	kcRoles := make([]keycloakRole, len(roles))
 	for i, role := range roles {
 		kcRoles[i] = *toKeycloakRole(role)
 	}
 
-	response, err := c.httpClient.DoRequest(ctx, http.MethodDelete, fmt.Sprintf("/admin/realms/%s/users/%s/role-mappings/realm", url.PathEscape(organizationName), url.PathEscape(userID)), kcRoles)
+	response, err := c.httpClient.DoRequest(ctx, http.MethodDelete, fmt.Sprintf("/admin/realms/%s/users/%s/role-mappings/realm", c.realmName, url.PathEscape(userID)), kcRoles)
 	if err != nil {
 		return fmt.Errorf("failed to remove realm roles from user: %w", err)
 	}
@@ -430,7 +442,7 @@ func (c *Client) RemoveOrganizationRolesFromUser(ctx context.Context, organizati
 //   - Internal UUID: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 func (c *Client) RemoveClientRolesFromUser(ctx context.Context, organizationName, userID, clientID string, roles []*idp.Role) error {
 	// Resolve to internal UUID
-	internalID, err := c.GetClientByClientID(ctx, organizationName, clientID)
+	internalID, err := c.GetRealmClientByClientID(ctx, clientID, c.realmName)
 	if err != nil {
 		return fmt.Errorf("failed to resolve client ID: %w", err)
 	}
@@ -475,7 +487,7 @@ func (c *Client) GetUserOrganizationRoles(ctx context.Context, organizationName,
 //   - Internal UUID: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 func (c *Client) GetUserClientRoles(ctx context.Context, organizationName, userID, clientID string) ([]*idp.Role, error) {
 	// Resolve to internal UUID
-	internalID, err := c.GetClientByClientID(ctx, organizationName, clientID)
+	internalID, err := c.GetRealmClientByClientID(ctx, clientID, c.realmName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve client ID: %w", err)
 	}
@@ -498,42 +510,42 @@ func (c *Client) GetUserClientRoles(ctx context.Context, organizationName, userI
 	return roles, nil
 }
 
-// GetClientByClientID resolves a client identifier to its internal UUID.
+// GetRealmClientByClientID resolves a client identifier to its internal UUID.
 //
 // The clientID parameter accepts either format:
 //   - Human-readable clientId: "realm-management", "account", "my-app"
 //   - Internal UUID: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 //
 // The method first checks if clientID is a valid UUID. If so, it returns it immediately
-// (no API call needed). For the "realm-management" client (the only client we currently use),
-// the internal UUID is looked up once per organization and stored.
+// (no API call needed).
 //
 // This is needed because Keycloak's role-mapping API endpoints require the internal UUID,
 // but we use the human-readable clientId "realm-management".
 //
 // Example:
 //
-//	uuid, err := client.GetClientByClientID(ctx, "my-org", "realm-management")
+//	uuid, err := client.GetRealmClientByClientID(ctx, "realm-management", "osac")
+//
+// "realm-management" is the human-readable clientId
+// "osac" is the realm name
+//
 //	// Returns: "a1b2c3d4-e5f6-7890-..." (internal UUID)
-func (c *Client) GetClientByClientID(ctx context.Context, organizationName, clientID string) (string, error) {
+func (c *Client) GetRealmClientByClientID(ctx context.Context, clientID, realmName string) (string, error) {
 	// Check if clientID is already a valid UUID (internal ID)
 	// If so, return it immediately without making an API call
 	if _, err := uuid.Parse(clientID); err == nil {
 		return clientID, nil
 	}
 
-	// For realm-management, check if we already have the UUID for this organization
+	// For realm-management client, use the cached client ID if available
 	if clientID == realmManagementClientID {
-		c.mu.RLock()
-		if storedUUID, found := c.realmManagementUUIDs[organizationName]; found {
-			c.mu.RUnlock()
-			return storedUUID, nil
+		if c.realmManagementClientID != "" {
+			return c.realmManagementClientID, nil
 		}
-		c.mu.RUnlock()
 	}
 
 	// Look up the client UUID via API
-	response, err := c.httpClient.DoRequest(ctx, http.MethodGet, fmt.Sprintf("/admin/realms/%s/clients?clientId=%s", url.PathEscape(organizationName), url.QueryEscape(clientID)), nil)
+	response, err := c.httpClient.DoRequest(ctx, http.MethodGet, fmt.Sprintf("/admin/realms/%s/clients?clientId=%s", realmName, url.QueryEscape(clientID)), nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to get client by clientId: %w", err)
 	}
@@ -549,14 +561,10 @@ func (c *Client) GetClientByClientID(ctx context.Context, organizationName, clie
 	}
 
 	internalUUID := kcClients[0].ID
-
-	// Save realm-management UUID for this organization
+	// For realm-management client, cache the client ID if not already cached
 	if clientID == realmManagementClientID {
-		c.mu.Lock()
-		c.realmManagementUUIDs[organizationName] = internalUUID
-		c.mu.Unlock()
+		c.realmManagementClientID = internalUUID
 	}
-
 	return internalUUID, nil
 }
 
@@ -633,7 +641,7 @@ func (c *Client) AssignIdpManagerPermissions(ctx context.Context, organizationNa
 	}
 
 	if len(rolesToAssign) == 0 {
-		return fmt.Errorf("no IdP manager roles found to assign for organization %s", organizationName)
+		return fmt.Errorf("no IdP manager roles found to assign")
 	}
 
 	// Assign the client roles to the user
@@ -641,11 +649,5 @@ func (c *Client) AssignIdpManagerPermissions(ctx context.Context, organizationNa
 	if err != nil {
 		return fmt.Errorf("failed to assign IdP manager roles: %w", err)
 	}
-
-	c.logger.InfoContext(ctx, "IdP manager permissions assigned",
-		slog.String("organization", organizationName),
-		slog.String("user_id", userID),
-		slog.Int("role_count", len(rolesToAssign)),
-	)
 	return nil
 }
