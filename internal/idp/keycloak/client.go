@@ -22,9 +22,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"slices"
 	"strings"
-	"sync"
 
 	"github.com/google/uuid"
 
@@ -40,7 +38,6 @@ type Client struct {
 
 	realmName               string
 	realmManagementClientID string
-	mu                      sync.RWMutex
 }
 
 // ClientBuilder builds a Keycloak client.
@@ -187,59 +184,63 @@ func (c *Client) DeleteOrganization(ctx context.Context, organizationName string
 	return nil
 }
 
-// CreateUser creates a new user in an organization.
-// Returns the created user with ID populated.
-func (c *Client) CreateUser(ctx context.Context, organizationName string, user *idp.User) (*idp.User, error) {
-	kcUser := toKeycloakUser(user)
-	response, err := c.httpClient.DoRequest(ctx, http.MethodPost, fmt.Sprintf("/admin/realms/%s/organizations/%s/users", c.realmName, url.PathEscape(organizationName)), kcUser)
+func (c *Client) AddUserToOrganization(ctx context.Context, organizationName string, userID string) error {
+	response, err := c.httpClient.DoRequest(ctx, http.MethodPost, fmt.Sprintf("/admin/realms/%s/organizations/%s/members", c.realmName, url.PathEscape(organizationName)), userID)
 	if err != nil {
-		var apiErr *apiclient.APIError
-		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusConflict {
-			return nil, fmt.Errorf("user %q already exists: %w", user.Username, err)
-		}
+		return fmt.Errorf("failed to add user to organization: %w", err)
+	}
+	defer response.Body.Close()
+	return nil
+}
+
+func (c *Client) CreateUserInRealm(ctx context.Context, user *idp.User) (*idp.User, error) {
+	kcUser := toKeycloakUser(user)
+	response, err := c.httpClient.DoRequest(ctx, http.MethodPost, fmt.Sprintf("/admin/realms/%s/users", c.realmName), kcUser)
+	if err != nil {
 		return nil, fmt.Errorf("failed to create user: %w", err)
 	}
 	defer response.Body.Close()
 
-	// Extract user ID from Location header
-	// Location format: https://keycloak.example.com/admin/realms/{realm}/organizations/{organization-name}/users/{user-id}
 	location := response.Header.Get("Location")
 	if location == "" {
 		return nil, fmt.Errorf("Location header not present in create user response")
 	}
 
-	// Extract the last segment of the URL path as the user ID
+	// Extract the user ID from the Location header (e.g., "/admin/realms/osac/users/user-123" -> "user-123")
 	parts := strings.Split(strings.TrimSuffix(location, "/"), "/")
-	if len(parts) == 0 {
-		return nil, fmt.Errorf("failed to extract user ID from Location header: %s", location)
-	}
-
 	userID := parts[len(parts)-1]
-	if userID == "" {
-		return nil, fmt.Errorf("extracted user ID is empty from Location header: %s", location)
+	kcUser.ID = userID
+	return fromKeycloakUser(kcUser), nil
+}
+
+// CreateUser creates a new user in the OSAC realm and adds them to an organization.
+// Returns the created user with ID populated.
+// If adding to the organization fails, the user is still created in the realm and can be
+// added to the organization later using AddUserToOrganization.
+func (c *Client) CreateUser(ctx context.Context, organizationName string, user *idp.User) (*idp.User, error) {
+	// Step 1: Create user in the OSAC realm
+	createdUser, err := c.CreateUserInRealm(ctx, user)
+	if err != nil {
+		return nil, err
 	}
 
-	// Return a copy of the user with ID populated
-	createdUser := &idp.User{
-		ID:              userID,
-		Username:        user.Username,
-		Email:           user.Email,
-		EmailVerified:   user.EmailVerified,
-		Enabled:         user.Enabled,
-		FirstName:       user.FirstName,
-		LastName:        user.LastName,
-		Attributes:      user.Attributes,
-		Groups:          user.Groups,
-		Credentials:     user.Credentials,
-		RequiredActions: user.RequiredActions,
+	// Step 2: Add user to the organization
+	err = c.AddUserToOrganization(ctx, organizationName, createdUser.ID)
+	if err != nil {
+		c.logger.WarnContext(ctx, "User created but failed to add to organization",
+			slog.String("user_id", createdUser.ID),
+			slog.String("organization", organizationName),
+			slog.Any("error", err),
+		)
+		return createdUser, fmt.Errorf("failed to add user to organization (user %s created in realm): %w", createdUser.ID, err)
 	}
 
 	return createdUser, nil
 }
 
-// GetUser retrieves a user by ID.
+// GetUser retrieves a user by ID from the realm.
 func (c *Client) GetUser(ctx context.Context, organizationName, userID string) (*idp.User, error) {
-	response, err := c.httpClient.DoRequest(ctx, http.MethodGet, fmt.Sprintf("/admin/realms/%s/organizations/%s/users/%s", c.realmName, url.PathEscape(organizationName), url.PathEscape(userID)), nil)
+	response, err := c.httpClient.DoRequest(ctx, http.MethodGet, fmt.Sprintf("/admin/realms/%s/users/%s", c.realmName, url.PathEscape(userID)), nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user: %w", err)
 	}
@@ -252,7 +253,7 @@ func (c *Client) GetUser(ctx context.Context, organizationName, userID string) (
 	return fromKeycloakUser(&kcUser), nil
 }
 
-// ListUsers lists all users in an organization.
+// ListUsers lists all users (members) in an organization.
 func (c *Client) ListUsers(ctx context.Context, organizationName string) ([]*idp.User, error) {
 	var allUsers []*idp.User
 	const maxPerPage = 100
@@ -265,14 +266,14 @@ func (c *Client) ListUsers(ctx context.Context, organizationName string) ([]*idp
 			return nil, err
 		}
 
-		// Fetch one page of users
-		path := fmt.Sprintf("/admin/realms/%s/organizations/%s/users?first=%d&max=%d",
+		// Fetch one page of organization members
+		path := fmt.Sprintf("/admin/realms/%s/organizations/%s/members?first=%d&max=%d",
 			c.realmName,
 			url.PathEscape(organizationName), first, maxPerPage)
 
 		response, err := c.httpClient.DoRequest(ctx, http.MethodGet, path, nil)
 		if err != nil {
-			return nil, fmt.Errorf("failed to list users: %w", err)
+			return nil, fmt.Errorf("failed to list organization members: %w", err)
 		}
 
 		var kcUsers []keycloakUser
@@ -280,7 +281,7 @@ func (c *Client) ListUsers(ctx context.Context, organizationName string) ([]*idp
 		response.Body.Close()
 
 		if err != nil {
-			return nil, fmt.Errorf("failed to decode users response: %w", err)
+			return nil, fmt.Errorf("failed to decode organization members response: %w", err)
 		}
 
 		// Convert and append this page
@@ -300,48 +301,41 @@ func (c *Client) ListUsers(ctx context.Context, organizationName string) ([]*idp
 	return allUsers, nil
 }
 
-// DeleteUserFromOrganization deletes a user by ID from an organization.
+// DeleteUserFromOrganization removes a user (member) from an organization.
 func (c *Client) DeleteUserFromOrganization(ctx context.Context, organizationName, userID string) error {
-	response, err := c.httpClient.DoRequest(ctx, http.MethodDelete, fmt.Sprintf("/admin/realms/%s/organizations/%s/users/%s", c.realmName, url.PathEscape(organizationName), url.PathEscape(userID)), nil)
+	response, err := c.httpClient.DoRequest(ctx, http.MethodDelete, fmt.Sprintf("/admin/realms/%s/organizations/%s/members/%s", c.realmName, url.PathEscape(organizationName), url.PathEscape(userID)), nil)
 	if err != nil {
 		var apiErr *apiclient.APIError
 		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound {
 			return fmt.Errorf("user %q not found in organization %q: %w", userID, organizationName, err)
 		}
-		return fmt.Errorf("failed to delete user: %w", err)
+		return fmt.Errorf("failed to remove user %q from organization %q: %w", userID, organizationName, err)
+	}
+	defer response.Body.Close()
+	return nil
+}
+
+func (c *Client) DeleteUserFromRealm(ctx context.Context, userID string) error {
+	response, err := c.httpClient.DoRequest(ctx, http.MethodDelete, fmt.Sprintf("/admin/realms/%s/users/%s", c.realmName, url.PathEscape(userID)), nil)
+	if err != nil {
+		return fmt.Errorf("failed to delete user %q from realm: %w", userID, err)
 	}
 	defer response.Body.Close()
 	return nil
 }
 
 // DeleteUser deletes a user by ID from the realm.
+// Note: Deleting a user from the realm automatically removes them from all organizations,
+// so there's no need to explicitly remove them from the organization first.
 func (c *Client) DeleteUser(ctx context.Context, organizationName, userID string) error {
-	response, err := c.httpClient.DoRequest(ctx, http.MethodDelete, fmt.Sprintf("/admin/realms/%s/users/%s", c.realmName, url.PathEscape(userID)), nil)
-	if err != nil {
-		return fmt.Errorf("failed to delete user: %w", err)
-	}
-	defer response.Body.Close()
-	return nil
+	return c.DeleteUserFromRealm(ctx, userID)
 }
 
-// ListOrganizationRoles lists all organization-level (realm) roles.
+// ListOrganizationRoles lists all organization-level roles.
+// Note: Organizations in Keycloak don't have their own roles - they use realm roles.
 func (c *Client) ListOrganizationRoles(ctx context.Context, organizationName string) ([]*idp.Role, error) {
-	response, err := c.httpClient.DoRequest(ctx, http.MethodGet, fmt.Sprintf("/admin/realms/%s/organizations/%s/roles", c.realmName, url.PathEscape(organizationName)), nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list realm roles: %w", err)
-	}
-	defer response.Body.Close()
-
-	var kcRoles []keycloakRole
-	if err = json.NewDecoder(response.Body).Decode(&kcRoles); err != nil {
-		return nil, fmt.Errorf("failed to decode realm roles response: %w", err)
-	}
-
-	roles := make([]*idp.Role, len(kcRoles))
-	for i, kcRole := range kcRoles {
-		roles[i] = fromKeycloakRole(&kcRole)
-	}
-	return roles, nil
+	// TODO: implement function
+	return nil, nil
 }
 
 // ListClientRoles lists all roles for a specific client.
@@ -374,18 +368,9 @@ func (c *Client) ListClientRoles(ctx context.Context, organizationName, clientID
 	return roles, nil
 }
 
-// AssignOrganizationRolesToUser adds organization-level (realm) roles to a user.
+// AssignOrganizationRolesToUser adds organization-level roles to a user.
 func (c *Client) AssignOrganizationRolesToUser(ctx context.Context, organizationName, userID string, roles []*idp.Role) error {
-	kcRoles := make([]keycloakRole, len(roles))
-	for i, role := range roles {
-		kcRoles[i] = *toKeycloakRole(role)
-	}
-
-	response, err := c.httpClient.DoRequest(ctx, http.MethodPost, fmt.Sprintf("/admin/realms/%s/users/%s/role-mappings/realm", url.PathEscape(organizationName), url.PathEscape(userID)), kcRoles)
-	if err != nil {
-		return fmt.Errorf("failed to assign realm roles to user: %w", err)
-	}
-	defer response.Body.Close()
+	// TODO: implement function
 	return nil
 }
 
@@ -452,7 +437,7 @@ func (c *Client) RemoveClientRolesFromUser(ctx context.Context, organizationName
 		kcRoles[i] = *toKeycloakRole(role)
 	}
 
-	response, err := c.httpClient.DoRequest(ctx, http.MethodDelete, fmt.Sprintf("/admin/realms/%s/users/%s/role-mappings/clients/%s", url.PathEscape(organizationName), url.PathEscape(userID), url.PathEscape(internalID)), kcRoles)
+	response, err := c.httpClient.DoRequest(ctx, http.MethodDelete, fmt.Sprintf("/admin/realms/%s/users/%s/role-mappings/clients/%s", c.realmName, url.PathEscape(userID), url.PathEscape(internalID)), kcRoles)
 	if err != nil {
 		return fmt.Errorf("failed to remove client roles from user: %w", err)
 	}
@@ -460,24 +445,10 @@ func (c *Client) RemoveClientRolesFromUser(ctx context.Context, organizationName
 	return nil
 }
 
-// GetUserOrganizationRoles gets the organization-level (realm) roles assigned to a user.
+// GetUserOrganizationRoles gets the organization-level roles assigned to a user.
 func (c *Client) GetUserOrganizationRoles(ctx context.Context, organizationName, userID string) ([]*idp.Role, error) {
-	response, err := c.httpClient.DoRequest(ctx, http.MethodGet, fmt.Sprintf("/admin/realms/%s/users/%s/role-mappings/realm", url.PathEscape(organizationName), url.PathEscape(userID)), nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get user realm roles: %w", err)
-	}
-	defer response.Body.Close()
-
-	var kcRoles []keycloakRole
-	if err = json.NewDecoder(response.Body).Decode(&kcRoles); err != nil {
-		return nil, fmt.Errorf("failed to decode user realm roles response: %w", err)
-	}
-
-	roles := make([]*idp.Role, len(kcRoles))
-	for i, kcRole := range kcRoles {
-		roles[i] = fromKeycloakRole(&kcRole)
-	}
-	return roles, nil
+	// TODO: implement function
+	return nil, nil
 }
 
 // GetUserClientRoles gets the client-level roles assigned to a user.
@@ -492,7 +463,7 @@ func (c *Client) GetUserClientRoles(ctx context.Context, organizationName, userI
 		return nil, fmt.Errorf("failed to resolve client ID: %w", err)
 	}
 
-	response, err := c.httpClient.DoRequest(ctx, http.MethodGet, fmt.Sprintf("/admin/realms/%s/users/%s/role-mappings/clients/%s", url.PathEscape(organizationName), url.PathEscape(userID), url.PathEscape(internalID)), nil)
+	response, err := c.httpClient.DoRequest(ctx, http.MethodGet, fmt.Sprintf("/admin/realms/%s/users/%s/role-mappings/clients/%s", c.realmName, url.PathEscape(userID), url.PathEscape(internalID)), nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user client roles: %w", err)
 	}
@@ -568,86 +539,20 @@ func (c *Client) GetRealmClientByClientID(ctx context.Context, clientID, realmNa
 	return internalUUID, nil
 }
 
-// AssignOrganizationAdminPermissions grants full administrative access to an organization for the specified user.
+// AssignOrganizationAdminPermissions grants administrative access to an organization for the specified user.
 //
-// For Keycloak, this assigns client roles from the built-in "realm-management" client.
-// NOTE: Keycloak's administrative permissions are NOT organization roles - they are client-level roles
-// on the "realm-management" client that exists by default in every realm. This is why we use
-// AssignClientRolesToUser instead of AssignOrganizationRolesToUser.
+// For Keycloak, this assigns organization-level admin roles to the user.
 func (c *Client) AssignOrganizationAdminPermissions(ctx context.Context, organizationName, userID string) error {
-	c.logger.DebugContext(ctx, "Assigning organization admin permissions",
-		slog.String("organization", organizationName),
-		slog.String("user_id", userID),
-	)
-
-	// Get all roles from the built-in realm-management client.
-	// This is a special Keycloak client (not one we create) that exists by default
-	// and contains all administrative roles for the realm.
-	roles, err := c.ListClientRoles(ctx, organizationName, realmManagementClientID)
-	if err != nil {
-		return fmt.Errorf("failed to list realm-management roles: %w", err)
-	}
-
-	// Filter for the key management roles
-	var rolesToAssign []*idp.Role
-	for _, role := range roles {
-		if slices.Contains(keycloakRealmManagementRoles, role.Name) {
-			rolesToAssign = append(rolesToAssign, role)
-		}
-	}
-
-	if len(rolesToAssign) == 0 {
-		return fmt.Errorf("no realm management roles found to assign for organization %s", organizationName)
-	}
-
-	// Assign the client roles to the user.
-	// These are client-level roles from the "realm-management" client, not organization-level roles.
-	err = c.AssignClientRolesToUser(ctx, organizationName, userID, realmManagementClientID, rolesToAssign)
-	if err != nil {
-		return fmt.Errorf("failed to assign realm management roles: %w", err)
-	}
-
-	c.logger.InfoContext(ctx, "Organization admin permissions assigned",
-		slog.String("organization", organizationName),
-		slog.String("user_id", userID),
-		slog.Int("role_count", len(rolesToAssign)),
-	)
+	// TODO: implement function
 	return nil
 }
 
 // AssignIdpManagerPermissions grants limited IdP management permissions to the specified user.
 //
-// For Keycloak, this assigns a limited set of client roles from the built-in "realm-management" client.
-// The break-glass account can manage users and identity providers but cannot modify critical
-// realm settings, clients, or authorization policies.
+// For Keycloak, this assigns a limited set of organization-level admin roles to the user.
+// Intended for the break-glass account which can manage users and identity providers but cannot modify critical
+// organization settings, realm settings, or authorization policies.
 func (c *Client) AssignIdpManagerPermissions(ctx context.Context, organizationName, userID string) error {
-	c.logger.DebugContext(ctx, "Assigning IdP manager permissions",
-		slog.String("organization", organizationName),
-		slog.String("user_id", userID),
-	)
-
-	// Get all roles from the built-in realm-management client
-	roles, err := c.ListClientRoles(ctx, organizationName, realmManagementClientID)
-	if err != nil {
-		return fmt.Errorf("failed to list realm-management roles: %w", err)
-	}
-
-	// Filter for the limited IdP manager roles
-	var rolesToAssign []*idp.Role
-	for _, role := range roles {
-		if slices.Contains(keycloakIdpManagerRoles, role.Name) {
-			rolesToAssign = append(rolesToAssign, role)
-		}
-	}
-
-	if len(rolesToAssign) == 0 {
-		return fmt.Errorf("no IdP manager roles found to assign")
-	}
-
-	// Assign the client roles to the user
-	err = c.AssignClientRolesToUser(ctx, organizationName, userID, realmManagementClientID, rolesToAssign)
-	if err != nil {
-		return fmt.Errorf("failed to assign IdP manager roles: %w", err)
-	}
+	// TODO: implement function
 	return nil
 }
