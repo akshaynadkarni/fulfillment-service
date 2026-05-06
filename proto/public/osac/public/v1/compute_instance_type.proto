@@ -194,7 +194,7 @@ message ComputeInstanceStatus {
   //
   // In this example the `PROVISIONED` condition is true (infrastructure is allocated), `CONFIGURATION_APPLIED` is true
   // (the desired configuration has been applied by the provisioning provider), and `READY` is true (the compute
-  // instance is reachable via the IP address in `status.ip_address`).
+  // instance is reachable via the internal IP address in `status.internal_ip_address`).
   //
   // The `state` field reflects the VM power state as reported by the hypervisor. Possible states include
   // `STARTING`, `RUNNING`, `FAILED`, `DELETING`, `STOPPING`, `STOPPED`, and `PAUSED`.
@@ -206,10 +206,10 @@ message ComputeInstanceStatus {
   // reasons.
   repeated ComputeInstanceCondition conditions = 2;
 
-  // IP address of the compute instance.
+  // Internal IP address of the compute instance.
   //
   // This will be empty if the compute instance isn't running.
-  string ip_address = 3;
+  string internal_ip_address = 3;
 
   // LastRestartedAt records when the last restart was initiated by the controller.
   //
@@ -226,6 +226,9 @@ message ComputeInstanceStatus {
   //    }
   //
   optional google.protobuf.Timestamp last_restarted_at = 4;
+
+  // Public IP address attached to the compute instance.
+  string public_ip_address = 5;
 }
 
 // Represents the overall state of a compute instance.
@@ -297,7 +300,7 @@ enum ComputeInstanceConditionType {
   // Indicates that the compute instance is ready and accessible.
   //
   // When `status` is `TRUE`, the compute instance is running and the readiness check
-  // has passed. The instance is reachable via the IP address in `status.ip_address`.
+  // has passed. The instance is reachable via the internal IP address in `status.internal_ip_address`.
   //
   // When `status` is `FALSE`, the instance is not yet reachable (e.g. it is still
   // starting, the readiness check has not passed, or the instance is stopped/paused).
