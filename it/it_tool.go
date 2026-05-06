@@ -14,11 +14,14 @@ language governing permissions and limitations under the License.
 package it
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -32,6 +35,7 @@ import (
 	"github.com/cenkalti/backoff/v4"
 	"github.com/onsi/gomega/ghttp"
 	"github.com/osac-project/fulfillment-service/internal/auth"
+	"github.com/osac-project/fulfillment-service/internal/jq"
 	"github.com/osac-project/fulfillment-service/internal/network"
 	"github.com/osac-project/fulfillment-service/internal/oauth"
 	"github.com/osac-project/fulfillment-service/internal/testing"
@@ -78,14 +82,14 @@ var OIDCTenants = map[string][]string{
 // ToolBuilder contains the data and logic needed to create an instance of the integration test tool. Don't create
 // instances of this directly, use the NewTool function instead.
 type ToolBuilder struct {
-	logger       *slog.Logger
-	projectDir   string
-	crdFiles     []string
-	keepCluster  bool
-	keepService  bool
-	deployMode   string
-	debug        bool
-	clientSecret string
+	logger      *slog.Logger
+	projectDir  string
+	crdFiles    []string
+	keepCluster bool
+	keepService bool
+	deployMode  string
+	debug       bool
+	secret      string
 }
 
 // Tool is an instance of the integration test tool that sets up the test environment. Don't create instances of this
@@ -106,7 +110,8 @@ type Tool struct {
 	kcFile        string
 	internalView  *ToolView
 	externalView  *ToolView
-	clientSecret  string
+	secret        string
+	jqTool        *jq.Tool
 }
 
 // ToolView contains the gRPC connections and HTTP clients that can be used to connect to the cluster. This is a
@@ -182,10 +187,10 @@ func (b *ToolBuilder) SetDebug(value bool) *ToolBuilder {
 	return b
 }
 
-// SetClientSecret sets the client secret that will be used for the service accounts that will be created. If not
-// specified then a random secret will be generated.
-func (b *ToolBuilder) SetClientSecret(value string) *ToolBuilder {
-	b.clientSecret = value
+// SetSecret sets the secret used in all places where passwords or secrets are needed, such as service account client
+// secrets and user passwords. If not set then a random one will be generated.
+func (b *ToolBuilder) SetSecret(value string) *ToolBuilder {
+	b.secret = value
 	return b
 }
 
@@ -213,22 +218,26 @@ func (b *ToolBuilder) Build() (result *Tool, err error) {
 		}
 	}
 
-	// Generate a random client secret if not specified:
-	clientSecret := b.clientSecret
-	if clientSecret == "" {
-		clientSecret = uuid.New()
+	// Create the JQ tool:
+	jqTool, err := jq.NewTool().
+		SetLogger(b.logger).
+		Build()
+	if err != nil {
+		err = fmt.Errorf("failed to create JQ tool: %w", err)
+		return
 	}
 
 	// Create and populate the object:
 	result = &Tool{
-		logger:       b.logger,
-		projectDir:   projectDir,
-		crdFiles:     slices.Clone(b.crdFiles),
-		keepKind:     b.keepCluster,
-		keepService:  b.keepService,
-		deployMode:   b.deployMode,
-		debug:        b.debug,
-		clientSecret: clientSecret,
+		logger:      b.logger,
+		projectDir:  projectDir,
+		crdFiles:    slices.Clone(b.crdFiles),
+		keepKind:    b.keepCluster,
+		keepService: b.keepService,
+		deployMode:  b.deployMode,
+		debug:       b.debug,
+		secret:      b.secret,
+		jqTool:      jqTool,
 	}
 	return
 }
@@ -324,6 +333,12 @@ func (t *Tool) Setup(ctx context.Context) error {
 	// Get the clients:
 	t.kubeClient = t.cluster.Client()
 	t.kubeClientSet = t.cluster.ClientSet()
+
+	// Resolve the secret to use for passwords and credentials:
+	err = t.resolveRandomSecret(ctx)
+	if err != nil {
+		return err
+	}
 
 	// Load the CA bundle:
 	err = t.loadCaBundle(ctx)
@@ -529,6 +544,74 @@ func (t *Tool) startCluster(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to start cluster: %w", err)
 	}
+	return nil
+}
+
+// resolveRandomSecret determines the secret to use for all passwords and credentials. If the secret was explicitly
+// provided (via the 'IT_SECRET' environment variable) it is used and persisted to the cluster. Otherwise, the method
+// tries to read an existing secret from the cluster. If none exists, a random one is generated and saved. This ensures
+// that re-runs against an existing cluster reuse the same secret.
+func (t *Tool) resolveRandomSecret(ctx context.Context) error {
+	t.logger.DebugContext(ctx, "Resolving secret")
+
+	// Try to fetch the current secret from the cluster:
+	secretKey := crclient.ObjectKey{
+		Namespace: "default",
+		Name:      randomSecretName,
+	}
+	secretObject := &corev1.Secret{}
+	err := t.kubeClient.Get(ctx, secretKey, secretObject)
+	if err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf(
+			"failed to get random secret '%s/%s': %w",
+			randomSecretNamespace, randomSecretName, err,
+		)
+	}
+
+	// If the secret didn't exist then generate a new one if needed, and save it to the cluster:
+	if apierrors.IsNotFound(err) {
+		if t.secret == "" {
+			t.secret = uuid.New()
+		}
+		secretObject = &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: secretKey.Namespace,
+				Name:      secretKey.Name,
+			},
+			Data: map[string][]byte{
+				randomSecretKey: []byte(t.secret),
+			},
+		}
+		err = t.kubeClient.Create(ctx, secretObject)
+		if err != nil {
+			return fmt.Errorf(
+				"failed to create random secret '%s/%s': %w",
+				randomSecretNamespace, randomSecretName, err,
+			)
+		}
+		return nil
+	}
+
+	// Make sure that the secret loaded from the cluster does contain the expected key and that it matches the one
+	// explicitly provided, as otherwise things will break:
+	secretBytes, ok := secretObject.Data[randomSecretKey]
+	if !ok {
+		return fmt.Errorf(
+			"secret '%s/%s' does not contain the expected key '%s'",
+			randomSecretNamespace, randomSecretName, randomSecretKey,
+		)
+	}
+	secretText := string(secretBytes)
+	if t.secret != "" && t.secret != secretText {
+		return fmt.Errorf(
+			"secret '%s/%s' has changed from '%s' to '%s'",
+			randomSecretNamespace, randomSecretName, t.secret, secretText,
+		)
+	}
+
+	// If we are here then we can use the secret loaded from the cluster:
+	t.secret = secretText
+
 	return nil
 }
 
@@ -750,7 +833,7 @@ func (t *Tool) createControllerCredentials(ctx context.Context) error {
 		},
 		StringData: map[string]string{
 			"client-id":     controllerClientId,
-			"client-secret": t.clientSecret,
+			"client-secret": t.secret,
 		},
 	}
 	err := t.kubeClient.Create(ctx, secret)
@@ -780,6 +863,10 @@ func (t *Tool) deployKeycloak(ctx context.Context) error {
 	valuesData := map[string]any{
 		"variant":  "kind",
 		"hostname": host,
+		"admin": map[string]any{
+			"username": "admin",
+			"password": t.secret,
+		},
 		"certs": map[string]any{
 			"issuerRef": map[string]any{
 				"kind": "ClusterIssuer",
@@ -928,7 +1015,7 @@ func (t *Tool) deployKeycloak(ctx context.Context) error {
 				"clientId":                  data.ClientId,
 				"enabled":                   true,
 				"clientAuthenticatorType":   "client-secret",
-				"secret":                    t.clientSecret,
+				"secret":                    t.secret,
 				"serviceAccountsEnabled":    true,
 				"publicClient":              false,
 				"standardFlowEnabled":       false,
@@ -1006,6 +1093,186 @@ func (t *Tool) deployKeycloak(ctx context.Context) error {
 	if err = installCmd.Execute(ctx); err != nil {
 		return fmt.Errorf("failed to install Keycloak: %w", err)
 	}
+
+	// Create a token source to connect to the Keycloak admin API:
+	tokenStore, err := auth.NewMemoryTokenStore().
+		SetLogger(t.logger).
+		Build()
+	if err != nil {
+		return fmt.Errorf("failed to create Keycloak admin token store: %w", err)
+	}
+	tokenSource, err := oauth.NewTokenSource().
+		SetLogger(t.logger).
+		SetStore(tokenStore).
+		SetCaPool(t.caPool).
+		SetIssuer(fmt.Sprintf("https://%s/realms/master", keycloakAddr)).
+		SetFlow(oauth.PasswordFlow).
+		SetClientId("admin-cli").
+		SetUsername("admin").
+		SetPassword(t.secret).
+		SetScopes("openid").
+		Build()
+	if err != nil {
+		return fmt.Errorf("failed to create Keycloak admin token source: %w", err)
+	}
+
+	// Create an HTTP client to connect to the Keycloak admin API:
+	httpClient := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				RootCAs: t.caPool,
+			},
+		},
+	}
+
+	// Helper to make authenticated requests to the Keycloak admin API:
+	sendRequest := func(method, path string, input any) (code int, output []byte, err error) {
+		var body io.Reader
+		if input != nil {
+			var data []byte
+			data, err = json.Marshal(input)
+			if err != nil {
+				err = fmt.Errorf("failed to marshal request body: %w", err)
+				return
+			}
+			body = bytes.NewReader(data)
+		}
+		url := fmt.Sprintf("https://%s/admin/realms/master%s", keycloakAddr, path)
+		request, err := http.NewRequestWithContext(ctx, method, url, body)
+		if err != nil {
+			err = fmt.Errorf("failed to create request: %w", err)
+			return
+		}
+		if input != nil {
+			request.Header.Set("Content-Type", "application/json")
+		}
+		var token *auth.Token
+		token, err = tokenSource.Token(ctx)
+		if err != nil {
+			err = fmt.Errorf("failed to get token: %w", err)
+			return
+		}
+		request.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token.Access))
+		response, err := httpClient.Do(request)
+		if err != nil {
+			err = fmt.Errorf("failed to send request: %w", err)
+			return
+		}
+		defer response.Body.Close()
+		output, err = io.ReadAll(response.Body)
+		if err != nil {
+			err = fmt.Errorf("failed to read response body: %w", err)
+			return
+		}
+		code = response.StatusCode
+		return
+	}
+
+	// Create the 'admin' client in the master realm:
+	code, body, err := sendRequest(
+		http.MethodPost,
+		"/clients",
+		map[string]any{
+			"clientId":                  "admin",
+			"name":                      "Administrator",
+			"description":               "Administrator",
+			"enabled":                   true,
+			"clientAuthenticatorType":   "client-secret",
+			"secret":                    t.secret,
+			"serviceAccountsEnabled":    true,
+			"publicClient":              false,
+			"standardFlowEnabled":       false,
+			"implicitFlowEnabled":       false,
+			"directAccessGrantsEnabled": false,
+			"protocol":                  "openid-connect",
+			"fullScopeAllowed":          true,
+		},
+	)
+	if err != nil {
+		return err
+	}
+	if code != http.StatusCreated && code != http.StatusConflict {
+		return fmt.Errorf("failed to create admin client in master realm: %d", code)
+	}
+
+	// Find the internal identifier of the client we just created:
+	code, body, err = sendRequest(
+		http.MethodGet,
+		"/clients",
+		nil,
+	)
+	if err != nil {
+		return err
+	}
+	if code != http.StatusOK {
+		return fmt.Errorf("failed to find admin client in master realm: %d", code)
+	}
+	var adminClientId string
+	err = t.jqTool.EvaluateBytes(
+		`.[] | select(.clientId == "admin") | .id`,
+		body,
+		&adminClientId,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to get admin client identifier: %w", err)
+	}
+
+	// Get the service account user for the client:
+	code, body, err = sendRequest(
+		http.MethodGet,
+		fmt.Sprintf("/clients/%s/service-account-user", adminClientId),
+		nil,
+	)
+	if err != nil {
+		return err
+	}
+	if code != http.StatusOK {
+		return fmt.Errorf("failed to get service account user: %d", code)
+	}
+	var adminUserId string
+	err = t.jqTool.EvaluateBytes(`.id`, body, &adminUserId)
+	if err != nil {
+		return fmt.Errorf("failed to get service account user identifier: %w", err)
+	}
+
+	// Find the 'admin' realm role in the master realm:
+	code, body, err = sendRequest(
+		http.MethodGet,
+		"/roles/admin",
+		nil,
+	)
+	if err != nil {
+		return err
+	}
+	if code != http.StatusOK {
+		return fmt.Errorf("failed to find admin role: %d", code)
+	}
+	var adminRoleId string
+	err = t.jqTool.EvaluateBytes(`.id`, body, &adminRoleId)
+	if err != nil {
+		return fmt.Errorf("failed to get admin role identifier: %w", err)
+	}
+
+	// Assign the 'admin' role to the service account user:
+	code, body, err = sendRequest(
+		http.MethodPost,
+		fmt.Sprintf("/users/%s/role-mappings/realm", adminUserId),
+		[]any{
+			map[string]any{
+				"id":   adminRoleId,
+				"name": "admin",
+			},
+		},
+	)
+	if err != nil {
+		return err
+	}
+	if code != http.StatusNoContent && code != http.StatusConflict {
+		return fmt.Errorf("failed to assign admin role: %d", code)
+	}
+
+	t.logger.InfoContext(ctx, "Created admin service account")
+
 	return nil
 }
 
@@ -1867,6 +2134,13 @@ const (
 	keycloakDatabaseConfigMap        = "keycloak-database-config"
 	serviceDatabaseClientCertSecret  = "fulfillment-database-client-cert"
 	serviceDatabaseConfigMap         = "fulfillment-database-config"
+)
+
+// Namespace, name and key of the Kubernetes secret that contains the random secret used for passwords and credentials.
+const (
+	randomSecretNamespace = "default"
+	randomSecretName      = "random"
+	randomSecretKey       = "secret"
 )
 
 // Name of the Kubernetes secret that contains the OAuth client credentials that the controller uses to authenticate to

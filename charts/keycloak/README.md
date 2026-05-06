@@ -17,6 +17,8 @@ The following table lists the configurable parameters of the Keycloak chart:
 | `hostname`                     | The hostname that Keycloak uses to refer to itself             | **Yes**  | None            |
 | `certs.issuerRef.kind`         | The kind of cert-manager issuer (`ClusterIssuer` or `Issuer`)  | No       | `ClusterIssuer` |
 | `certs.issuerRef.name`         | The name of the cert-manager issuer for TLS certificates       | **Yes**  | None            |
+| `admin.username`               | Bootstrap admin username for the initial Keycloak account      | No       | `admin`         |
+| `admin.password`               | Bootstrap admin password for the initial Keycloak account      | No       | `admin`         |
 | `images.keycloak`              | The Keycloak container image                                   | No       | `26.3`          |
 | `database.connection`          | List of sources for database connection parameters (see below) | No       | `[]`            |
 | `groups`                       | List of groups to create in the Keycloak realm                 | No       | `[]`            |

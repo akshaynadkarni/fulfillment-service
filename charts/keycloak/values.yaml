@@ -28,6 +28,11 @@ certs:
     kind: ClusterIssuer
     name:
 
+# Bootstrap admin credentials used for the initial Keycloak administrator account:
+admin:
+  username: admin
+  password: admin
+
 # Image configuration:
 images:
   keycloak: quay.io/keycloak/keycloak:26.3

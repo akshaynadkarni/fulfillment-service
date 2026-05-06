@@ -76,9 +76,9 @@ spec:
           readOnly: true
         env:
         - name: KC_BOOTSTRAP_ADMIN_USERNAME
-          value: admin
+          value: {{ .Values.admin.username | quote }}
         - name: KC_BOOTSTRAP_ADMIN_PASSWORD
-          value: admin
+          value: {{ .Values.admin.password | quote }}
         command:
         - /bin/bash
         - -c
