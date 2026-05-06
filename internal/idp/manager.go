@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-// OrganizationManager handles the lifecycle of IdP realms for organizations.
+// OrganizationManager handles the lifecycle of IdP organizations.
 // It works with any IdP client implementation.
 type OrganizationManager struct {
 	logger *slog.Logger
@@ -71,9 +71,9 @@ func (b *OrganizationManagerBuilder) Build() (result *OrganizationManager, err e
 	return
 }
 
-// OrganizationConfig contains configuration for creating an organization realm.
+// OrganizationConfig contains configuration for creating an organization.
 type OrganizationConfig struct {
-	// Name is the unique identifier for the organization (used as realm name)
+	// Name is the unique identifier for the organization
 	Name string
 
 	// DisplayName is the human-readable name
@@ -302,8 +302,8 @@ func (m *OrganizationManager) assignIdpManagerPermissions(ctx context.Context, o
 	return nil
 }
 
-// DeleteOrganizationRealm deletes an IdP organization and all its resources.
-func (m *OrganizationManager) DeleteOrganizationRealm(ctx context.Context, organizationName string) error {
+// DeleteOrganization deletes an IdP organization and all its resources.
+func (m *OrganizationManager) DeleteOrganization(ctx context.Context, organizationName string) error {
 	m.logger.InfoContext(ctx, "Deleting IdP organization",
 		slog.String("organization", organizationName),
 	)

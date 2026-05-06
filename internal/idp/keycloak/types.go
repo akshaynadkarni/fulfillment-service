@@ -21,14 +21,6 @@ import (
 // These map directly to the Keycloak REST API.
 // See: https://www.keycloak.org/docs-api/latest/rest-api/index.html
 
-type keycloakRealm struct {
-	ID          string              `json:"id,omitempty"`
-	Realm       string              `json:"realm,omitempty"`
-	DisplayName string              `json:"displayName,omitempty"`
-	Enabled     *bool               `json:"enabled,omitempty"`
-	Attributes  map[string][]string `json:"attributes,omitempty"`
-}
-
 type keycloakUser struct {
 	ID              string              `json:"id,omitempty"`
 	Username        string              `json:"username,omitempty"`
@@ -64,32 +56,15 @@ type keycloakRole struct {
 	Attributes  map[string][]string `json:"attributes,omitempty"`
 }
 
+type keycloakOrganization struct {
+	ID         string              `json:"id,omitempty"`
+	Name       string              `json:"name,omitempty"`
+	Alias      string              `json:"alias,omitempty"`
+	Enabled    *bool               `json:"enabled,omitempty"`
+	Attributes map[string][]string `json:"attributes,omitempty"`
+}
+
 // Conversion functions from generic types to Keycloak types
-
-func toKeycloakRealm(org *idp.Organization) *keycloakRealm {
-	enabled := org.Enabled
-	return &keycloakRealm{
-		ID:          org.ID,
-		Realm:       org.Name,
-		DisplayName: org.DisplayName,
-		Enabled:     &enabled,
-		Attributes:  org.Attributes,
-	}
-}
-
-func fromKeycloakRealm(kcRealm *keycloakRealm) *idp.Organization {
-	enabled := false
-	if kcRealm.Enabled != nil {
-		enabled = *kcRealm.Enabled
-	}
-	return &idp.Organization{
-		ID:          kcRealm.ID,
-		Name:        kcRealm.Realm,
-		DisplayName: kcRealm.DisplayName,
-		Enabled:     enabled,
-		Attributes:  kcRealm.Attributes,
-	}
-}
 
 func toKeycloakUser(user *idp.User) *keycloakUser {
 	emailVerified := user.EmailVerified
@@ -191,5 +166,34 @@ func fromKeycloakRole(kcRole *keycloakRole) *idp.Role {
 		ClientRole:  clientRole,
 		ContainerID: kcRole.ContainerID,
 		Attributes:  kcRole.Attributes,
+	}
+}
+
+func toKeycloakOrganization(org *idp.Organization) *keycloakOrganization {
+	enabled := org.Enabled
+	return &keycloakOrganization{
+		ID:         org.ID,
+		Name:       org.Name,
+		Enabled:    &enabled,
+		Attributes: org.Attributes,
+	}
+}
+
+func fromKeycloakOrganization(kcOrg *keycloakOrganization) *idp.Organization {
+	enabled := false
+	if kcOrg.Enabled != nil {
+		enabled = *kcOrg.Enabled
+	}
+	// Use Alias as DisplayName if Name is not suitable for display
+	displayName := kcOrg.Alias
+	if displayName == "" {
+		displayName = kcOrg.Name
+	}
+	return &idp.Organization{
+		ID:          kcOrg.ID,
+		Name:        kcOrg.Name,
+		DisplayName: displayName,
+		Enabled:     enabled,
+		Attributes:  kcOrg.Attributes,
 	}
 }

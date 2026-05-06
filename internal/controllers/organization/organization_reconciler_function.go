@@ -254,7 +254,7 @@ func (t *task) delete(ctx context.Context) error {
 		return nil
 	}
 
-	err := t.r.idpManager.DeleteOrganizationRealm(ctx, orgName)
+	err := t.r.idpManager.DeleteOrganization(ctx, orgName)
 	if err != nil {
 		return fmt.Errorf("failed to delete IDP organization: %w", err)
 	}

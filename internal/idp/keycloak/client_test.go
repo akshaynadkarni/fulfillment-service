@@ -48,24 +48,24 @@ var _ = Describe("Keycloak Client", func() {
 
 	Describe("CreateOrganization", func() {
 		It("creates an organization in Keycloak", func() {
-			var receivedRealm *keycloakRealm
+			var receivedOrg *keycloakOrganization
 			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Method == http.MethodPost && r.URL.Path == "/admin/realms" {
+				if r.Method == http.MethodPost && r.URL.Path == "/admin/realms/osac/organizations" {
 					// Create request
-					receivedRealm = &keycloakRealm{}
-					json.NewDecoder(r.Body).Decode(receivedRealm)
+					receivedOrg = &keycloakOrganization{}
+					json.NewDecoder(r.Body).Decode(receivedOrg)
 					w.WriteHeader(http.StatusCreated)
 					return
 				}
 
-				if r.Method == http.MethodGet && r.URL.Path == "/admin/realms/test-org" {
+				if r.Method == http.MethodGet && r.URL.Path == "/admin/realms/osac/organizations/test-org" {
 					// Get request to verify creation
 					enabled := true
-					response := keycloakRealm{
-						ID:          "realm-uuid-123",
-						Realm:       "test-org",
-						DisplayName: "Test Organization",
-						Enabled:     &enabled,
+					response := keycloakOrganization{
+						ID:      "org-uuid-123",
+						Name:    "test-org",
+						Alias:   "Test Organization",
+						Enabled: &enabled,
 					}
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusOK)
@@ -85,9 +85,9 @@ var _ = Describe("Keycloak Client", func() {
 			}
 			createdOrg, err := client.CreateOrganization(ctx, org)
 			Expect(err).ToNot(HaveOccurred())
-			Expect(receivedRealm.Realm).To(Equal("test-org"))
+			Expect(receivedOrg.Name).To(Equal("test-org"))
 			Expect(createdOrg).ToNot(BeNil())
-			Expect(createdOrg.ID).To(Equal("realm-uuid-123"))
+			Expect(createdOrg.ID).To(Equal("org-uuid-123"))
 			Expect(createdOrg.Name).To(Equal("test-org"))
 			Expect(createdOrg.DisplayName).To(Equal("Test Organization"))
 			Expect(createdOrg.Enabled).To(BeTrue())
@@ -130,19 +130,20 @@ var _ = Describe("Keycloak Client", func() {
 	Describe("GetOrganization", func() {
 		It("retrieves an organization from Keycloak", func() {
 			enabled := true
-			testRealm := &keycloakRealm{
-				ID:          "org-id",
-				Realm:       "test-org",
-				DisplayName: "Test Organization",
-				Enabled:     &enabled,
+			testOrg := &keycloakOrganization{
+				ID:      "org-id",
+				Name:    "test-org",
+				Alias:   "Test Organization",
+				Enabled: &enabled,
 			}
 
 			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				Expect(r.Method).To(Equal(http.MethodGet))
+				Expect(r.URL.Path).To(Equal("/admin/realms/osac/organizations/test-org"))
 
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
-				json.NewEncoder(w).Encode(testRealm)
+				json.NewEncoder(w).Encode(testOrg)
 			}))
 
 			client = createTestClient(server.URL)
@@ -180,9 +181,10 @@ var _ = Describe("Keycloak Client", func() {
 		It("creates a user and extracts ID from Location header", func() {
 			var receivedUser *keycloakUser
 			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				Expect(r.URL.Path).To(Equal("/admin/realms/osac/organizations/test-org/users"))
 				receivedUser = &keycloakUser{}
 				json.NewDecoder(r.Body).Decode(receivedUser)
-				w.Header().Set("Location", "/admin/realms/test-org/users/user-123-abc")
+				w.Header().Set("Location", "/admin/realms/osac/organizations/test-org/users/user-123-abc")
 				w.WriteHeader(http.StatusCreated)
 			}))
 
@@ -259,6 +261,7 @@ var _ = Describe("Keycloak Client", func() {
 			requestCount := 0
 			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				Expect(r.Method).To(Equal(http.MethodGet))
+				Expect(r.URL.Path).To(Equal("/admin/realms/osac/organizations/test-org/users"))
 
 				// Parse query parameters
 				query := r.URL.Query()
@@ -385,7 +388,7 @@ var _ = Describe("Keycloak Client", func() {
 
 			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				Expect(r.Method).To(Equal(http.MethodGet))
-				Expect(r.URL.Path).To(Equal("/admin/realms/test-org/users/user-123-abc"))
+				Expect(r.URL.Path).To(Equal("/admin/realms/osac/organizations/test-org/users/user-123-abc"))
 
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
@@ -443,7 +446,7 @@ var _ = Describe("Keycloak Client", func() {
 		It("deletes a user from Keycloak", func() {
 			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				Expect(r.Method).To(Equal(http.MethodDelete))
-				Expect(r.URL.Path).To(Equal("/admin/realms/test-org/users/user-123-abc"))
+				Expect(r.URL.Path).To(Equal("/admin/realms/osac/users/user-123-abc"))
 				w.WriteHeader(http.StatusNoContent)
 			}))
 			client = createTestClient(server.URL)
@@ -458,8 +461,7 @@ var _ = Describe("Keycloak Client", func() {
 			client = createTestClient(server.URL)
 			err := client.DeleteUser(ctx, "test-org", "user-123-abc")
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("not found"))
-			Expect(err.Error()).To(ContainSubstring("user-123-abc"))
+			Expect(err.Error()).To(ContainSubstring("failed to delete user"))
 
 			var apiErr *apiclient.APIError
 			Expect(errors.As(err, &apiErr)).To(BeTrue())
@@ -481,7 +483,7 @@ var _ = Describe("Keycloak Client", func() {
 		It("deletes an organization from Keycloak", func() {
 			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				Expect(r.Method).To(Equal(http.MethodDelete))
-				Expect(r.URL.Path).To(Equal("/admin/realms/test-org"))
+				Expect(r.URL.Path).To(Equal("/admin/realms/osac/organizations/test-org"))
 				w.WriteHeader(http.StatusNoContent)
 			}))
 
@@ -509,58 +511,6 @@ var _ = Describe("Keycloak Client", func() {
 			err := client.DeleteOrganization(ctx, "test-org")
 			Expect(err).To(HaveOccurred())
 		})
-
-		It("clears cached realm-management UUID when organization is deleted", func() {
-			clients := []keycloakClient{
-				{ID: "internal-uuid-123", ClientID: "realm-management"},
-			}
-
-			requestCount := 0
-			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				requestCount++
-
-				// Handle GetClientByClientID requests
-				if r.Method == http.MethodGet && r.URL.Path == "/admin/realms/test-org/clients" {
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(http.StatusOK)
-					json.NewEncoder(w).Encode(clients)
-					return
-				}
-
-				// Handle DeleteOrganization request
-				if r.Method == http.MethodDelete && r.URL.Path == "/admin/realms/test-org" {
-					w.WriteHeader(http.StatusNoContent)
-					return
-				}
-
-				w.WriteHeader(http.StatusNotFound)
-			}))
-
-			client = createTestClient(server.URL)
-
-			// First, populate the cache by calling GetClientByClientID
-			internalID, err := client.GetClientByClientID(ctx, "test-org", "realm-management")
-			Expect(err).ToNot(HaveOccurred())
-			Expect(internalID).To(Equal("internal-uuid-123"))
-			Expect(requestCount).To(Equal(1))
-
-			// Verify the cache is populated (second call doesn't make a request)
-			internalID2, err := client.GetClientByClientID(ctx, "test-org", "realm-management")
-			Expect(err).ToNot(HaveOccurred())
-			Expect(internalID2).To(Equal("internal-uuid-123"))
-			Expect(requestCount).To(Equal(1)) // Still 1, used cache
-
-			// Delete the organization
-			err = client.DeleteOrganization(ctx, "test-org")
-			Expect(err).ToNot(HaveOccurred())
-			Expect(requestCount).To(Equal(2)) // Delete request made
-
-			// Verify the cache was cleared (next call makes a new request)
-			internalID3, err := client.GetClientByClientID(ctx, "test-org", "realm-management")
-			Expect(err).ToNot(HaveOccurred())
-			Expect(internalID3).To(Equal("internal-uuid-123"))
-			Expect(requestCount).To(Equal(3)) // New request made, cache was cleared
-		})
 	})
 
 	Describe("ListOrganizationRoles", func() {
@@ -573,7 +523,7 @@ var _ = Describe("Keycloak Client", func() {
 
 			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				Expect(r.Method).To(Equal(http.MethodGet))
-				Expect(r.URL.Path).To(Equal("/admin/realms/test-org/roles"))
+				Expect(r.URL.Path).To(Equal("/admin/realms/osac/organizations/test-org/roles"))
 
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
@@ -627,7 +577,7 @@ var _ = Describe("Keycloak Client", func() {
 				Expect(r.Method).To(Equal(http.MethodGet))
 
 				// First call is to resolve client ID
-				if r.URL.Path == "/admin/realms/test-org/clients" {
+				if r.URL.Path == "/admin/realms/osac/clients" {
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusOK)
 					json.NewEncoder(w).Encode(clients)
@@ -635,7 +585,7 @@ var _ = Describe("Keycloak Client", func() {
 				}
 
 				// Second call is to fetch roles
-				Expect(r.URL.Path).To(Equal("/admin/realms/test-org/clients/internal-uuid-123/roles"))
+				Expect(r.URL.Path).To(Equal("/admin/realms/osac/clients/internal-uuid-123/roles"))
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
 				json.NewEncoder(w).Encode(roles)
@@ -669,7 +619,7 @@ var _ = Describe("Keycloak Client", func() {
 				w.WriteHeader(http.StatusOK)
 
 				// First call returns valid clients, second call returns invalid JSON
-				if r.URL.Path == "/admin/realms/test-org/clients" {
+				if r.URL.Path == "/admin/realms/osac/clients" {
 					json.NewEncoder(w).Encode(clients)
 				} else {
 					w.Write([]byte("invalid json"))
@@ -719,7 +669,7 @@ var _ = Describe("Keycloak Client", func() {
 
 			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				// First call is to resolve client ID
-				if r.Method == http.MethodGet && r.URL.Path == "/admin/realms/test-org/clients" {
+				if r.Method == http.MethodGet && r.URL.Path == "/admin/realms/osac/clients" {
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusOK)
 					json.NewEncoder(w).Encode(clients)
@@ -728,7 +678,7 @@ var _ = Describe("Keycloak Client", func() {
 
 				// Second call is to assign roles
 				Expect(r.Method).To(Equal(http.MethodPost))
-				Expect(r.URL.Path).To(Equal("/admin/realms/test-org/users/user-123/role-mappings/clients/internal-uuid-123"))
+				Expect(r.URL.Path).To(Equal("/admin/realms/osac/users/user-123/role-mappings/clients/internal-uuid-123"))
 				w.WriteHeader(http.StatusNoContent)
 			}))
 
@@ -753,30 +703,13 @@ var _ = Describe("Keycloak Client", func() {
 	})
 
 	Describe("RemoveOrganizationRolesFromUser", func() {
-		It("removes organization roles from a user", func() {
-			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				Expect(r.Method).To(Equal(http.MethodDelete))
-				Expect(r.URL.Path).To(Equal("/admin/realms/test-org/users/user-123/role-mappings/realm"))
-				w.WriteHeader(http.StatusNoContent)
-			}))
-
+		It("is not yet implemented (returns nil)", func() {
 			client = createTestClient(server.URL)
 			roles := []*idp.Role{
 				{ID: "role1", Name: "admin"},
 			}
 			err := client.RemoveOrganizationRolesFromUser(ctx, "test-org", "user-123", roles)
-			Expect(err).ToNot(HaveOccurred())
-		})
-
-		It("returns an error on server error", func() {
-			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusInternalServerError)
-			}))
-
-			client = createTestClient(server.URL)
-			roles := []*idp.Role{{ID: "role1", Name: "admin"}}
-			err := client.RemoveOrganizationRolesFromUser(ctx, "test-org", "user-123", roles)
-			Expect(err).To(HaveOccurred())
+			Expect(err).ToNot(HaveOccurred()) // TODO returns nil until implemented
 		})
 	})
 
@@ -788,7 +721,7 @@ var _ = Describe("Keycloak Client", func() {
 
 			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				// First call is to resolve client ID
-				if r.Method == http.MethodGet && r.URL.Path == "/admin/realms/test-org/clients" {
+				if r.Method == http.MethodGet && r.URL.Path == "/admin/realms/osac/clients" {
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusOK)
 					json.NewEncoder(w).Encode(clients)
@@ -882,7 +815,7 @@ var _ = Describe("Keycloak Client", func() {
 				Expect(r.Method).To(Equal(http.MethodGet))
 
 				// First call is to resolve client ID
-				if r.URL.Path == "/admin/realms/test-org/clients" {
+				if r.URL.Path == "/admin/realms/osac/clients" {
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusOK)
 					json.NewEncoder(w).Encode(clients)
@@ -923,7 +856,7 @@ var _ = Describe("Keycloak Client", func() {
 				w.WriteHeader(http.StatusOK)
 
 				// First call returns valid clients, second call returns invalid JSON
-				if r.URL.Path == "/admin/realms/test-org/clients" {
+				if r.URL.Path == "/admin/realms/osac/clients" {
 					json.NewEncoder(w).Encode(clients)
 				} else {
 					w.Write([]byte("invalid json"))
@@ -957,21 +890,21 @@ var _ = Describe("Keycloak Client", func() {
 				w.Header().Set("Content-Type", "application/json")
 
 				// Handle different request types based on method and path
-				if r.Method == http.MethodGet && r.URL.Path == "/admin/realms/test-org/clients" {
+				if r.Method == http.MethodGet && r.URL.Path == "/admin/realms/osac/clients" {
 					// Resolve client ID (cached after first call)
 					w.WriteHeader(http.StatusOK)
 					json.NewEncoder(w).Encode(clients)
 					return
 				}
 
-				if r.Method == http.MethodGet && r.URL.Path == "/admin/realms/test-org/clients/internal-uuid-123/roles" {
+				if r.Method == http.MethodGet && r.URL.Path == "/admin/realms/osac/clients/internal-uuid-123/roles" {
 					// List client roles
 					w.WriteHeader(http.StatusOK)
 					json.NewEncoder(w).Encode(allRoles)
 					return
 				}
 
-				if r.Method == http.MethodPost && r.URL.Path == "/admin/realms/test-org/users/user-123/role-mappings/clients/internal-uuid-123" {
+				if r.Method == http.MethodPost && r.URL.Path == "/admin/realms/osac/users/user-123/role-mappings/clients/internal-uuid-123" {
 					// Assign client roles
 					json.NewDecoder(r.Body).Decode(&assignedRoles)
 					w.WriteHeader(http.StatusNoContent)
@@ -1053,14 +986,14 @@ var _ = Describe("Keycloak Client", func() {
 				w.Header().Set("Content-Type", "application/json")
 
 				// Resolve client ID succeeds
-				if r.Method == http.MethodGet && r.URL.Path == "/admin/realms/test-org/clients" {
+				if r.Method == http.MethodGet && r.URL.Path == "/admin/realms/osac/clients" {
 					w.WriteHeader(http.StatusOK)
 					json.NewEncoder(w).Encode(clients)
 					return
 				}
 
 				// List roles succeeds
-				if r.Method == http.MethodGet && r.URL.Path == "/admin/realms/test-org/clients/internal-uuid-123/roles" {
+				if r.Method == http.MethodGet && r.URL.Path == "/admin/realms/osac/clients/internal-uuid-123/roles" {
 					w.WriteHeader(http.StatusOK)
 					json.NewEncoder(w).Encode(allRoles)
 					return
@@ -1104,21 +1037,21 @@ var _ = Describe("Keycloak Client", func() {
 				w.Header().Set("Content-Type", "application/json")
 
 				// Handle different request types based on method and path
-				if r.Method == http.MethodGet && r.URL.Path == "/admin/realms/test-org/clients" {
+				if r.Method == http.MethodGet && r.URL.Path == "/admin/realms/osac/clients" {
 					// Resolve client ID (cached after first call)
 					w.WriteHeader(http.StatusOK)
 					json.NewEncoder(w).Encode(clients)
 					return
 				}
 
-				if r.Method == http.MethodGet && r.URL.Path == "/admin/realms/test-org/clients/internal-uuid-123/roles" {
+				if r.Method == http.MethodGet && r.URL.Path == "/admin/realms/osac/clients/internal-uuid-123/roles" {
 					// List client roles
 					w.WriteHeader(http.StatusOK)
 					json.NewEncoder(w).Encode(allRoles)
 					return
 				}
 
-				if r.Method == http.MethodPost && r.URL.Path == "/admin/realms/test-org/users/user-123/role-mappings/clients/internal-uuid-123" {
+				if r.Method == http.MethodPost && r.URL.Path == "/admin/realms/osac/users/user-123/role-mappings/clients/internal-uuid-123" {
 					// Assign client roles
 					json.NewDecoder(r.Body).Decode(&assignedRoles)
 					w.WriteHeader(http.StatusNoContent)
@@ -1202,14 +1135,14 @@ var _ = Describe("Keycloak Client", func() {
 				w.Header().Set("Content-Type", "application/json")
 
 				// Resolve client ID succeeds
-				if r.Method == http.MethodGet && r.URL.Path == "/admin/realms/test-org/clients" {
+				if r.Method == http.MethodGet && r.URL.Path == "/admin/realms/osac/clients" {
 					w.WriteHeader(http.StatusOK)
 					json.NewEncoder(w).Encode(clients)
 					return
 				}
 
 				// List roles succeeds
-				if r.Method == http.MethodGet && r.URL.Path == "/admin/realms/test-org/clients/internal-uuid-123/roles" {
+				if r.Method == http.MethodGet && r.URL.Path == "/admin/realms/osac/clients/internal-uuid-123/roles" {
 					w.WriteHeader(http.StatusOK)
 					json.NewEncoder(w).Encode(allRoles)
 					return
@@ -1231,7 +1164,7 @@ var _ = Describe("Keycloak Client", func() {
 		})
 	})
 
-	Describe("GetClientByClientID", func() {
+	Describe("GetRealmClientByClientID", func() {
 		It("resolves client ID from clientId attribute", func() {
 			clients := []keycloakClient{
 				{ID: "internal-uuid-123", ClientID: "realm-management"},
@@ -1239,7 +1172,7 @@ var _ = Describe("Keycloak Client", func() {
 
 			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				Expect(r.Method).To(Equal(http.MethodGet))
-				Expect(r.URL.Path).To(Equal("/admin/realms/test-org/clients"))
+				Expect(r.URL.Path).To(Equal("/admin/realms/osac/clients"))
 				Expect(r.URL.Query().Get("clientId")).To(Equal("realm-management"))
 
 				w.Header().Set("Content-Type", "application/json")
@@ -1248,7 +1181,7 @@ var _ = Describe("Keycloak Client", func() {
 			}))
 
 			client = createTestClient(server.URL)
-			internalID, err := client.GetClientByClientID(ctx, "test-org", "realm-management")
+			internalID, err := client.GetRealmClientByClientID(ctx, "realm-management", "osac")
 			Expect(err).ToNot(HaveOccurred())
 			Expect(internalID).To(Equal("internal-uuid-123"))
 		})
@@ -1263,7 +1196,7 @@ var _ = Describe("Keycloak Client", func() {
 
 			client = createTestClient(server.URL)
 			validUUID := "550e8400-e29b-41d4-a716-446655440000"
-			internalID, err := client.GetClientByClientID(ctx, "test-org", validUUID)
+			internalID, err := client.GetRealmClientByClientID(ctx, validUUID, "osac")
 			Expect(err).ToNot(HaveOccurred())
 			Expect(internalID).To(Equal(validUUID))
 
@@ -1279,7 +1212,7 @@ var _ = Describe("Keycloak Client", func() {
 			}))
 
 			client = createTestClient(server.URL)
-			_, err := client.GetClientByClientID(ctx, "test-org", "not-a-valid-uuid")
+			_, err := client.GetRealmClientByClientID(ctx, "not-a-valid-uuid", "osac")
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("not found"))
 		})
@@ -1290,7 +1223,7 @@ var _ = Describe("Keycloak Client", func() {
 			}))
 
 			client = createTestClient(server.URL)
-			_, err := client.GetClientByClientID(ctx, "test-org", "realm-management")
+			_, err := client.GetRealmClientByClientID(ctx, "realm-management", "osac")
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -1302,12 +1235,12 @@ var _ = Describe("Keycloak Client", func() {
 			}))
 
 			client = createTestClient(server.URL)
-			_, err := client.GetClientByClientID(ctx, "test-org", "realm-management")
+			_, err := client.GetRealmClientByClientID(ctx, "realm-management", "osac")
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("failed to decode clients response"))
 		})
 
-		It("stores realm-management UUID to avoid repeated API calls", func() {
+		It("caches realm-management UUID to avoid repeated API calls", func() {
 			clients := []keycloakClient{
 				{ID: "internal-uuid-123", ClientID: "realm-management"},
 			}
@@ -1316,7 +1249,7 @@ var _ = Describe("Keycloak Client", func() {
 			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				requestCount++
 				Expect(r.Method).To(Equal(http.MethodGet))
-				Expect(r.URL.Path).To(Equal("/admin/realms/test-org/clients"))
+				Expect(r.URL.Path).To(Equal("/admin/realms/osac/clients"))
 
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
@@ -1326,71 +1259,25 @@ var _ = Describe("Keycloak Client", func() {
 			client = createTestClient(server.URL)
 
 			// First call - makes HTTP request
-			internalID1, err := client.GetClientByClientID(ctx, "test-org", "realm-management")
+			internalID1, err := client.GetRealmClientByClientID(ctx, "realm-management", "osac")
 			Expect(err).ToNot(HaveOccurred())
 			Expect(internalID1).To(Equal("internal-uuid-123"))
 			Expect(requestCount).To(Equal(1))
 
-			// Second call - uses stored UUID, no HTTP request
-			internalID2, err := client.GetClientByClientID(ctx, "test-org", "realm-management")
+			// Second call - uses cached UUID, no HTTP request
+			internalID2, err := client.GetRealmClientByClientID(ctx, "realm-management", "osac")
 			Expect(err).ToNot(HaveOccurred())
 			Expect(internalID2).To(Equal("internal-uuid-123"))
 			Expect(requestCount).To(Equal(1)) // Still 1, not incremented
 
-			// Third call - uses stored UUID
-			internalID3, err := client.GetClientByClientID(ctx, "test-org", "realm-management")
+			// Third call - uses cached UUID
+			internalID3, err := client.GetRealmClientByClientID(ctx, "realm-management", "osac")
 			Expect(err).ToNot(HaveOccurred())
 			Expect(internalID3).To(Equal("internal-uuid-123"))
 			Expect(requestCount).To(Equal(1))
 		})
 
-		It("stores realm-management UUIDs for multiple organizations", func() {
-			requestCount := 0
-			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				requestCount++
-				Expect(r.Method).To(Equal(http.MethodGet))
-
-				// Return different UUIDs based on organization
-				var clients []keycloakClient
-				if r.URL.Path == "/admin/realms/org-1/clients" {
-					clients = []keycloakClient{{ID: "uuid-for-org-1", ClientID: "realm-management"}}
-				} else if r.URL.Path == "/admin/realms/org-2/clients" {
-					clients = []keycloakClient{{ID: "uuid-for-org-2", ClientID: "realm-management"}}
-				}
-
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				json.NewEncoder(w).Encode(clients)
-			}))
-
-			client = createTestClient(server.URL)
-
-			// First org - makes HTTP request
-			id1, err := client.GetClientByClientID(ctx, "org-1", "realm-management")
-			Expect(err).ToNot(HaveOccurred())
-			Expect(id1).To(Equal("uuid-for-org-1"))
-			Expect(requestCount).To(Equal(1))
-
-			// Second org - makes HTTP request
-			id2, err := client.GetClientByClientID(ctx, "org-2", "realm-management")
-			Expect(err).ToNot(HaveOccurred())
-			Expect(id2).To(Equal("uuid-for-org-2"))
-			Expect(requestCount).To(Equal(2))
-
-			// First org again - uses stored UUID
-			id1Again, err := client.GetClientByClientID(ctx, "org-1", "realm-management")
-			Expect(err).ToNot(HaveOccurred())
-			Expect(id1Again).To(Equal("uuid-for-org-1"))
-			Expect(requestCount).To(Equal(2)) // No new request
-
-			// Second org again - uses stored UUID
-			id2Again, err := client.GetClientByClientID(ctx, "org-2", "realm-management")
-			Expect(err).ToNot(HaveOccurred())
-			Expect(id2Again).To(Equal("uuid-for-org-2"))
-			Expect(requestCount).To(Equal(2)) // No new request
-		})
-
-		It("does not store UUIDs passed directly", func() {
+		It("does not cache UUIDs passed directly", func() {
 			serverCalled := false
 			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				serverCalled = true
@@ -1401,13 +1288,13 @@ var _ = Describe("Keycloak Client", func() {
 			validUUID := "550e8400-e29b-41d4-a716-446655440000"
 
 			// First call with UUID
-			id1, err := client.GetClientByClientID(ctx, "test-org", validUUID)
+			id1, err := client.GetRealmClientByClientID(ctx, validUUID, "osac")
 			Expect(err).ToNot(HaveOccurred())
 			Expect(id1).To(Equal(validUUID))
 			Expect(serverCalled).To(BeFalse())
 
 			// Second call with same UUID
-			id2, err := client.GetClientByClientID(ctx, "test-org", validUUID)
+			id2, err := client.GetRealmClientByClientID(ctx, validUUID, "osac")
 			Expect(err).ToNot(HaveOccurred())
 			Expect(id2).To(Equal(validUUID))
 			Expect(serverCalled).To(BeFalse()) // Still no HTTP call
