@@ -25,6 +25,7 @@ import (
 	publicv1 "github.com/osac-project/fulfillment-service/internal/api/osac/public/v1"
 	"github.com/osac-project/fulfillment-service/internal/logging"
 	"github.com/osac-project/fulfillment-service/internal/terminal"
+	"github.com/osac-project/fulfillment-service/internal/uuid"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 	"google.golang.org/grpc"
@@ -81,11 +82,12 @@ Login credentials:
 }
 
 type runnerContext struct {
-	logger  *slog.Logger
-	console *terminal.Console
-	conn    *grpc.ClientConn
-	spinner *terminal.Spinner
-	args    struct {
+	logger   *slog.Logger
+	console  *terminal.Console
+	conn     *grpc.ClientConn
+	spinner  *terminal.Spinner
+	clientID string
+	args     struct {
 		timeout time.Duration
 	}
 }
@@ -93,6 +95,8 @@ type runnerContext struct {
 func (c *runnerContext) run(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	key := args[0]
+
+	c.clientID = uuid.New()
 
 	// Get the logger and console.
 	c.logger = logging.LoggerFromContext(ctx)
@@ -265,6 +269,7 @@ func (c *runnerContext) connectOnce(ctx context.Context, instanceID string) erro
 			ResourceType: publicv1.ConsoleResourceType_CONSOLE_RESOURCE_TYPE_COMPUTE_INSTANCE,
 			ResourceId:   instanceID,
 			Type:         publicv1.ConsoleType_CONSOLE_TYPE_SERIAL,
+			ClientId:     c.clientID,
 		}.Build(),
 	}.Build())
 	if err != nil {

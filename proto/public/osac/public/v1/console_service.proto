@@ -54,6 +54,10 @@ message ConsoleConnectInit {
   ConsoleResourceType resource_type = 1;
   string resource_id = 2;
   ConsoleType type = 3;
+  // Stable identifier for the CLI process. When a new connection arrives with
+  // a client_id matching an existing session from the same user, the server
+  // evicts the stale session and admits the new one. Empty means no eviction.
+  string client_id = 4;
 }
 
 // Terminal input data from the client.

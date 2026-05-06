@@ -92,8 +92,8 @@ data:
               stat_prefix: external-api
               http2_protocol_options:
                 connection_keepalive:
-                  interval: 30s
-                  timeout: 30s
+                  interval: 15s
+                  timeout: 10s
               route_config:
                 name: backend
                 virtual_hosts:
@@ -198,8 +198,8 @@ data:
               stat_prefix: internal-api
               http2_protocol_options:
                 connection_keepalive:
-                  interval: 30s
-                  timeout: 30s
+                  interval: 15s
+                  timeout: 10s
               route_config:
                 name: backend
                 virtual_hosts:
