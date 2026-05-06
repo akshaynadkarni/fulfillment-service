@@ -27,6 +27,7 @@ import (
 	grpcstatus "google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/osac-project/fulfillment-service/internal/cmd/cli/delete/publicipattachment"
 	"github.com/osac-project/fulfillment-service/internal/config"
 	"github.com/osac-project/fulfillment-service/internal/exit"
 	"github.com/osac-project/fulfillment-service/internal/logging"
@@ -44,6 +45,7 @@ func Cmd() *cobra.Command {
 		Short: "Delete objects",
 		RunE:  runner.run,
 	}
+	result.AddCommand(publicipattachment.Cmd())
 	return result
 }
 
@@ -153,11 +155,13 @@ func (c *runnerContext) run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Delete each resolved object:
+	// Delete each resolved object. Attempt all deletions and report errors at the end
+	var hadErrors bool
 	for _, object := range objects {
 		id := c.helper.GetId(object)
 		err = c.helper.Delete(ctx, id)
 		if err != nil {
+			hadErrors = true
 			status, ok := grpcstatus.FromError(err)
 			if ok && status.Code() == grpccodes.NotFound {
 				c.console.Errorf(
@@ -165,14 +169,19 @@ func (c *runnerContext) run(cmd *cobra.Command, args []string) error {
 					"Can't delete %s '%s' because it doesn't exist.\n",
 					args[0], id,
 				)
-				return exit.Error(1)
+			} else {
+				c.console.Errorf(
+					ctx,
+					"Failed to delete %s '%s': %v\n",
+					args[0], id, err,
+				)
 			}
-			return fmt.Errorf(
-				"failed to delete %s '%s': %w",
-				args[0], id, err,
-			)
+			continue
 		}
 		c.console.Infof(ctx, "Deleted %s '%s'.\n", args[0], id)
+	}
+	if hadErrors {
+		return exit.Error(1)
 	}
 
 	return nil

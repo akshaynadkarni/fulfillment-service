@@ -25,6 +25,7 @@ import (
 	"github.com/osac-project/fulfillment-service/internal/cmd/cli/create/cluster"
 	"github.com/osac-project/fulfillment-service/internal/cmd/cli/create/computeinstance"
 	"github.com/osac-project/fulfillment-service/internal/cmd/cli/create/hub"
+	"github.com/osac-project/fulfillment-service/internal/cmd/cli/create/publicip"
 	"github.com/osac-project/fulfillment-service/internal/cmd/cli/create/securitygroup"
 	"github.com/osac-project/fulfillment-service/internal/cmd/cli/create/subnet"
 	"github.com/osac-project/fulfillment-service/internal/cmd/cli/create/virtualnetwork"
@@ -40,6 +41,7 @@ var _ = Describe("Create command", func() {
 		Entry("cluster", cluster.Cmd, (*publicv1.Cluster)(nil)),
 		Entry("computeinstance", computeinstance.Cmd, (*publicv1.ComputeInstance)(nil)),
 		Entry("hub", hub.Cmd, (*privatev1.Hub)(nil)),
+		Entry("publicip", publicip.Cmd, (*publicv1.PublicIP)(nil)),
 		Entry("virtualnetwork", virtualnetwork.Cmd, (*publicv1.VirtualNetwork)(nil)),
 		Entry("subnet", subnet.Cmd, (*publicv1.Subnet)(nil)),
 		Entry("securitygroup", securitygroup.Cmd, (*publicv1.SecurityGroup)(nil)),
@@ -55,7 +57,7 @@ var _ = Describe("Create command", func() {
 				subcommandNames = append(subcommandNames, subcmd.Name())
 			}
 
-			Expect(subcommandNames).To(ContainElements("cluster", "computeinstance", "hub", "virtualnetwork", "subnet", "securitygroup"))
+			Expect(subcommandNames).To(ContainElements("cluster", "computeinstance", "hub", "publicip", "publicipattachment", "virtualnetwork", "subnet", "securitygroup"))
 		})
 	})
 })
