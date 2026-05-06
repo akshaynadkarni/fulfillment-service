@@ -84,6 +84,7 @@ type runnerContext struct {
 	logger  *slog.Logger
 	console *terminal.Console
 	conn    *grpc.ClientConn
+	spinner *terminal.Spinner
 	args    struct {
 		timeout time.Duration
 	}
@@ -119,6 +120,9 @@ func (c *runnerContext) run(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+
+	// Create spinner for connection status feedback.
+	c.spinner = terminal.NewSpinner(os.Stderr)
 
 	// Apply client-side session timeout.
 	if c.args.timeout > 0 {
@@ -170,6 +174,10 @@ func (c *runnerContext) connectWithRetry(ctx context.Context, instanceID string)
 	const maxConsecutiveRetries = 5
 	consecutiveFailures := 0
 	backoff := time.Second
+	wasConnected := false
+
+	c.spinner.Start(fmt.Sprintf("Connecting to %s...", instanceID))
+	defer c.spinner.Stop()
 
 	for {
 		err := c.connectOnce(ctx, instanceID)
@@ -177,6 +185,8 @@ func (c *runnerContext) connectWithRetry(ctx context.Context, instanceID string)
 			// Clean disconnect (e.g., escape sequence). Done.
 			return nil
 		}
+
+		c.spinner.Stop()
 
 		// If the context expired (timeout or cancel), return immediately.
 		if ctx.Err() != nil {
@@ -192,32 +202,43 @@ func (c *runnerContext) connectWithRetry(ctx context.Context, instanceID string)
 		// retry counter — the server was reachable, this is a new failure
 		// sequence.
 		if errors.Is(err, errConnectionLost) {
+			fmt.Fprintln(c.spinner.Writer())
+			wasConnected = true
 			consecutiveFailures = 0
 			backoff = time.Second
 		}
 
 		consecutiveFailures++
 		if consecutiveFailures > maxConsecutiveRetries {
-			c.console.Errorf(ctx, "\nGave up reconnecting after %d consecutive failures.\n",
+			c.console.Errorf(ctx, "Gave up after %d consecutive failures.\n",
 				maxConsecutiveRetries)
 			return fmt.Errorf("%s", userFacingError(err))
 		}
 
-		if consecutiveFailures == 1 {
-			c.console.Errorf(ctx, "\nConnection lost. Reconnecting...\n")
-		} else {
-			c.console.Errorf(ctx, "\nConnection lost. Reconnecting (attempt %d/%d)...\n",
-				consecutiveFailures, maxConsecutiveRetries)
-		}
+		c.spinner.Start(c.retryMessage(wasConnected, instanceID, consecutiveFailures, maxConsecutiveRetries))
 
 		select {
 		case <-ctx.Done():
+			c.spinner.Stop()
 			return ctx.Err()
 		case <-time.After(backoff):
 		}
 
 		backoff = min(backoff*2, 30*time.Second)
 	}
+}
+
+func (c *runnerContext) retryMessage(wasConnected bool, instanceID string, attempt, max int) string {
+	if wasConnected {
+		if attempt == 1 {
+			return "Reconnecting..."
+		}
+		return fmt.Sprintf("Reconnecting (attempt %d/%d)...", attempt, max)
+	}
+	if attempt == 1 {
+		return fmt.Sprintf("Connecting to %s...", instanceID)
+	}
+	return fmt.Sprintf("Connecting to %s (attempt %d/%d)...", instanceID, attempt, max)
 }
 
 func (c *runnerContext) connectOnce(ctx context.Context, instanceID string) error {
@@ -285,10 +306,10 @@ func (c *runnerContext) waitForConnected(ctx context.Context,
 		if st := resp.GetStatus(); st != nil {
 			switch st.GetState() {
 			case publicv1.ConsoleConnectionState_CONSOLE_CONNECTION_STATE_CONNECTED:
+				c.spinner.Stop()
 				c.console.Infof(ctx, "Connected to %s. Disconnect: Ctrl+] or Enter ~.\n", instanceID)
 				return nil
 			case publicv1.ConsoleConnectionState_CONSOLE_CONNECTION_STATE_CONNECTING:
-				c.console.Infof(ctx, "%s\n", st.GetMessage())
 			case publicv1.ConsoleConnectionState_CONSOLE_CONNECTION_STATE_ERROR:
 				return fmt.Errorf("server error: %s", st.GetMessage())
 			}

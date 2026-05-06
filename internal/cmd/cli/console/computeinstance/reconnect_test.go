@@ -16,6 +16,7 @@ package computeinstance
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"sync/atomic"
 
@@ -27,6 +28,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	publicv1 "github.com/osac-project/fulfillment-service/internal/api/osac/public/v1"
+	"github.com/osac-project/fulfillment-service/internal/terminal"
 )
 
 // testConsoleServer implements publicv1.ConsoleServer for reconnect testing.
@@ -112,6 +114,7 @@ var _ = Describe("Auto-reconnect", func() {
 			logger:  logger,
 			console: console,
 			conn:    conn,
+			spinner: terminal.NewSpinner(io.Discard),
 		}
 
 		ctx := context.Background()
@@ -151,6 +154,7 @@ var _ = Describe("Auto-reconnect", func() {
 			logger:  logger,
 			console: console,
 			conn:    conn,
+			spinner: terminal.NewSpinner(io.Discard),
 		}
 
 		err = runner.connectOnce(context.Background(), "test-vm")
@@ -175,6 +179,7 @@ var _ = Describe("Auto-reconnect", func() {
 			logger:  logger,
 			console: console,
 			conn:    conn,
+			spinner: terminal.NewSpinner(io.Discard),
 		}
 
 		ctx := context.Background()
@@ -205,6 +210,7 @@ var _ = Describe("connectOnce edge cases", func() {
 			logger:  logger,
 			console: console,
 			conn:    conn,
+			spinner: terminal.NewSpinner(io.Discard),
 		}
 
 		// Should handle EOF gracefully (return nil or io.EOF wrapped error).
