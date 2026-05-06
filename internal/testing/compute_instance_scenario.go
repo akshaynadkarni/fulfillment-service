@@ -39,10 +39,10 @@ type TemplateData struct {
 
 // InstanceData contains compute instance data
 type InstanceData struct {
-	ID        string
-	Name      string
-	Template  string
-	State     publicv1.ComputeInstanceState
+	ID                string
+	Name              string
+	Template          string
+	State             publicv1.ComputeInstanceState
 	InternalIPAddress string
 }
 
@@ -62,10 +62,10 @@ type templateFile struct {
 }
 
 type instanceFile struct {
-	ID        string `yaml:"id"`
-	Name      string `yaml:"name"`
-	Template  string `yaml:"template"`
-	State     string `yaml:"state"`
+	ID                string `yaml:"id"`
+	Name              string `yaml:"name"`
+	Template          string `yaml:"template"`
+	State             string `yaml:"state"`
 	InternalIPAddress string `yaml:"internalIpAddress"`
 }
 
@@ -108,10 +108,10 @@ func (f *computeInstanceScenarioFile) toScenario() (*ComputeInstanceScenario, er
 			return nil, fmt.Errorf("invalid compute instance state %q for instance %q", inst.State, inst.ID)
 		}
 		scenario.Instances[i] = &InstanceData{
-			ID:        inst.ID,
-			Name:      inst.Name,
-			Template:  inst.Template,
-			State:     publicv1.ComputeInstanceState(rawState),
+			ID:                inst.ID,
+			Name:              inst.Name,
+			Template:          inst.Template,
+			State:             publicv1.ComputeInstanceState(rawState),
 			InternalIPAddress: inst.InternalIPAddress,
 		}
 	}
@@ -142,7 +142,7 @@ func (i *InstanceData) ToProtoInstance() *publicv1.ComputeInstance {
 			Template: i.Template,
 		},
 		Status: &publicv1.ComputeInstanceStatus{
-			State:     i.State,
+			State:             i.State,
 			InternalIpAddress: i.InternalIPAddress,
 		},
 	}
