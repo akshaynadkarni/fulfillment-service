@@ -439,9 +439,9 @@ var _ = Describe("OrganizationManager", func() {
 		})
 	})
 
-	Describe("DeleteOrganizationRealm", func() {
+	Describe("DeleteOrganization", func() {
 		It("deletes the organization realm", func() {
-			err := manager.DeleteOrganizationRealm(ctx, "test-org")
+			err := manager.DeleteOrganization(ctx, "test-org")
 			Expect(err).ToNot(HaveOccurred())
 			Expect(mock.deletedRealm).To(Equal("test-org"))
 		})
@@ -457,7 +457,7 @@ var _ = Describe("OrganizationManager", func() {
 				Build()
 			Expect(err).ToNot(HaveOccurred())
 
-			err = failingManager.DeleteOrganizationRealm(ctx, "test-org")
+			err = failingManager.DeleteOrganization(ctx, "test-org")
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("failed to delete organization"))
 		})
