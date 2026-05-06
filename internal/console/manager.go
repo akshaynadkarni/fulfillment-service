@@ -43,6 +43,7 @@ type Manager struct {
 type session struct {
 	resourceKey string
 	user        string
+	clientID    string
 	startedAt   time.Time
 	cancel      context.CancelFunc
 }
@@ -88,21 +89,38 @@ func (b *ManagerBuilder) Build() (*Manager, error) {
 // Connect establishes a console connection to the target resource.
 // It returns an io.ReadWriteCloser for bidirectional communication.
 // The returned connection is closed when ctx is cancelled or the session times out.
-func (m *Manager) Connect(ctx context.Context, target Target, user string) (io.ReadWriteCloser, error) {
+//
+// If clientID is non-empty and matches an existing session from the same user,
+// the stale session is evicted and the new connection is admitted. This handles
+// reconnection after unclean TCP disconnects.
+func (m *Manager) Connect(ctx context.Context, target Target, user, clientID string) (io.ReadWriteCloser, error) {
 	backend, ok := m.backends[target.ResourceType]
 	if !ok {
 		return nil, fmt.Errorf("unsupported resource type %q", target.ResourceType)
 	}
 
-	// Check for existing session on this resource.
 	sessionKey := fmt.Sprintf("%s/%s", target.ResourceType, target.ResourceID)
+
+	var oldCancel context.CancelFunc
+
 	m.sessionsLock.Lock()
 	if existing, ok := m.sessions[sessionKey]; ok {
-		m.sessionsLock.Unlock()
-		return nil, &ErrSessionExists{
-			Resource: sessionKey,
-			User:     existing.user,
-			Since:    existing.startedAt.Format(time.RFC3339),
+		if clientID != "" && existing.clientID == clientID && existing.user == user {
+			m.logger.InfoContext(ctx, "Evicting stale console session",
+				slog.String("resource", sessionKey),
+				slog.String("user", user),
+				slog.String("client_id", clientID),
+				slog.Duration("age", time.Since(existing.startedAt)),
+			)
+			oldCancel = existing.cancel
+			delete(m.sessions, sessionKey)
+		} else {
+			m.sessionsLock.Unlock()
+			return nil, &ErrSessionExists{
+				Resource: sessionKey,
+				User:     existing.user,
+				Since:    existing.startedAt.Format(time.RFC3339),
+			}
 		}
 	}
 
@@ -111,11 +129,16 @@ func (m *Manager) Connect(ctx context.Context, target Target, user string) (io.R
 	s := &session{
 		resourceKey: sessionKey,
 		user:        user,
+		clientID:    clientID,
 		startedAt:   time.Now(),
 		cancel:      sessionCancel,
 	}
 	m.sessions[sessionKey] = s
 	m.sessionsLock.Unlock()
+
+	if oldCancel != nil {
+		oldCancel()
+	}
 
 	m.logger.InfoContext(ctx, "Opening console session",
 		slog.String("resource", sessionKey),
@@ -125,7 +148,7 @@ func (m *Manager) Connect(ctx context.Context, target Target, user string) (io.R
 
 	conn, err := backend.Connect(sessionCtx, target)
 	if err != nil {
-		m.removeSession(sessionKey)
+		m.removeSession(sessionKey, s)
 		sessionCancel()
 		return nil, err
 	}
@@ -134,6 +157,7 @@ func (m *Manager) Connect(ctx context.Context, target Target, user string) (io.R
 		ReadWriteCloser: conn,
 		manager:         m,
 		sessionKey:      sessionKey,
+		session:         s,
 		cancel:          sessionCancel,
 	}, nil
 }
@@ -161,10 +185,12 @@ func (m *Manager) CancelSessions() {
 	m.sessionsLock.Unlock()
 }
 
-func (m *Manager) removeSession(key string) {
+func (m *Manager) removeSession(key string, owner *session) {
 	m.sessionsLock.Lock()
 	defer m.sessionsLock.Unlock()
-	delete(m.sessions, key)
+	if m.sessions[key] == owner {
+		delete(m.sessions, key)
+	}
 }
 
 // managedConnection wraps an io.ReadWriteCloser and removes the session on close.
@@ -172,6 +198,7 @@ type managedConnection struct {
 	io.ReadWriteCloser
 	manager    *Manager
 	sessionKey string
+	session    *session
 	cancel     context.CancelFunc
 	closeOnce  sync.Once
 }
@@ -183,7 +210,7 @@ func (c *managedConnection) Close() error {
 			slog.String("resource", c.sessionKey),
 		)
 		err = c.ReadWriteCloser.Close()
-		c.manager.removeSession(c.sessionKey)
+		c.manager.removeSession(c.sessionKey, c.session)
 		c.cancel()
 	})
 	return err

@@ -47,6 +47,7 @@ type GrpcClientBuilder struct {
 	caPool             *x509.CertPool
 	tokenSource        auth.TokenSource
 	keepAlive          time.Duration
+	keepAliveTimeout   time.Duration
 	userAgent          string
 	unaryInterceptors  []grpc.UnaryClientInterceptor
 	streamInterceptors []grpc.StreamClientInterceptor
@@ -189,6 +190,12 @@ func (b *GrpcClientBuilder) SetTokenSource(value auth.TokenSource) *GrpcClientBu
 // SetKeepAlive sets the keep alive interval. This is optional, by default no keep alive is used.
 func (b *GrpcClientBuilder) SetKeepAlive(value time.Duration) *GrpcClientBuilder {
 	b.keepAlive = value
+	return b
+}
+
+// SetKeepAliveTimeout sets the keep alive timeout. This is optional, by default 20 seconds is used.
+func (b *GrpcClientBuilder) SetKeepAliveTimeout(value time.Duration) *GrpcClientBuilder {
+	b.keepAliveTimeout = value
 	return b
 }
 
@@ -339,8 +346,13 @@ func (b *GrpcClientBuilder) Build() (result *grpc.ClientConn, err error) {
 
 	// Set the keep alive options:
 	if b.keepAlive > 0 {
+		timeout := b.keepAliveTimeout
+		if timeout == 0 {
+			timeout = 20 * time.Second
+		}
 		options = append(options, grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Time: b.keepAlive,
+			Time:    b.keepAlive,
+			Timeout: timeout,
 		}))
 	}
 
