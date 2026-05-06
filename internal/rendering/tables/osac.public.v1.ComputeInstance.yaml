@@ -30,8 +30,8 @@ columns:
   value: this.status.state
   type: osac.public.v1.ComputeInstanceState
 
-- header: IP ADDRESS
-  value: this.status.ip_address
+- header: INTERNAL IP ADDRESS
+  value: this.status.internal_ip_address
 
 - header: PUBLIC IP ADDRESS
   value: this.status.public_ip_address

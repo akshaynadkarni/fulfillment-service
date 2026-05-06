@@ -85,7 +85,8 @@ message ComputeInstanceStatus {
   // Public fields.
   ComputeInstanceState state = 1;
   repeated ComputeInstanceCondition conditions = 2;
-  string ip_address = 3;
+  // Internal IP address of the compute instance.
+  string internal_ip_address = 3;
 
   // Identifier of the hub that was selected for this compute instance.
   string hub = 4;

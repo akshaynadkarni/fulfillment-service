@@ -206,10 +206,10 @@ message ComputeInstanceStatus {
   // reasons.
   repeated ComputeInstanceCondition conditions = 2;
 
-  // IP address of the compute instance.
+  // Internal IP address of the compute instance.
   //
   // This will be empty if the compute instance isn't running.
-  string ip_address = 3;
+  string internal_ip_address = 3;
 
   // LastRestartedAt records when the last restart was initiated by the controller.
   //

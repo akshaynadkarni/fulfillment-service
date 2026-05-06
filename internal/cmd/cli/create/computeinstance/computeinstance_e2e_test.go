@@ -66,7 +66,7 @@ var _ = Describe("Compute Instance E2E", func() {
 					Name:      "existing-instance",
 					Template:  "tpl-test-001",
 					State:     publicv1.ComputeInstanceState_COMPUTE_INSTANCE_STATE_RUNNING,
-					IPAddress: "192.168.1.100",
+					InternalIPAddress: "192.168.1.100",
 				},
 			},
 		}
