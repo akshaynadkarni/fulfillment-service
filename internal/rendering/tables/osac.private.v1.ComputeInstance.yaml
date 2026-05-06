@@ -32,3 +32,9 @@ columns:
   value: this.status.hub
   type: osac.private.v1.Hub
   lookup: true
+
+- header: IP ADDRESS
+  value: this.status.ip_address
+
+- header: PUBLIC IP ADDRESS
+  value: this.status.public_ip_address
