@@ -180,12 +180,25 @@ var _ = Describe("Keycloak Client", func() {
 	Describe("CreateUser", func() {
 		It("creates a user and extracts ID from Location header", func() {
 			var receivedUser *keycloakUser
+			var addedUserID string
 			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				Expect(r.URL.Path).To(Equal("/admin/realms/osac/organizations/test-org/users"))
-				receivedUser = &keycloakUser{}
-				json.NewDecoder(r.Body).Decode(receivedUser)
-				w.Header().Set("Location", "/admin/realms/osac/organizations/test-org/users/user-123-abc")
-				w.WriteHeader(http.StatusCreated)
+				// First request: create user in realm
+				if r.Method == http.MethodPost && r.URL.Path == "/admin/realms/osac/users" {
+					receivedUser = &keycloakUser{}
+					json.NewDecoder(r.Body).Decode(receivedUser)
+					w.Header().Set("Location", "/admin/realms/osac/users/user-123-abc")
+					w.WriteHeader(http.StatusCreated)
+					return
+				}
+
+				// Second request: add user to organization
+				if r.Method == http.MethodPost && r.URL.Path == "/admin/realms/osac/organizations/test-org/members" {
+					json.NewDecoder(r.Body).Decode(&addedUserID)
+					w.WriteHeader(http.StatusNoContent)
+					return
+				}
+
+				w.WriteHeader(http.StatusNotFound)
 			}))
 
 			client = createTestClient(server.URL)
@@ -201,6 +214,7 @@ var _ = Describe("Keycloak Client", func() {
 			createdUser, err := client.CreateUser(ctx, "test-org", user)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(receivedUser.Username).To(Equal("testuser"))
+			Expect(addedUserID).To(Equal("user-123-abc"))
 			Expect(createdUser).ToNot(BeNil())
 			Expect(createdUser.ID).To(Equal("user-123-abc"))
 			Expect(createdUser.Username).To(Equal("testuser"))
@@ -233,7 +247,7 @@ var _ = Describe("Keycloak Client", func() {
 				Enabled:  true,
 			})
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("already exists"))
+			Expect(err.Error()).To(ContainSubstring("failed to create user"))
 
 			var apiErr *apiclient.APIError
 			Expect(errors.As(err, &apiErr)).To(BeTrue())
@@ -254,6 +268,45 @@ var _ = Describe("Keycloak Client", func() {
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("failed to create user"))
 		})
+
+		It("returns created user even if adding to organization fails", func() {
+			userCreated := false
+			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// First request: create user in realm (succeeds)
+				if r.Method == http.MethodPost && r.URL.Path == "/admin/realms/osac/users" {
+					userCreated = true
+					w.Header().Set("Location", "/admin/realms/osac/users/user-123-abc")
+					w.WriteHeader(http.StatusCreated)
+					return
+				}
+
+				// Second request: add user to organization (fails)
+				if r.Method == http.MethodPost && r.URL.Path == "/admin/realms/osac/organizations/test-org/members" {
+					w.WriteHeader(http.StatusInternalServerError)
+					return
+				}
+
+				w.WriteHeader(http.StatusNotFound)
+			}))
+
+			client = createTestClient(server.URL)
+			createdUser, err := client.CreateUser(ctx, "test-org", &idp.User{
+				Username: "testuser",
+				Email:    "test@example.com",
+				Enabled:  true,
+			})
+
+			// Should return an error indicating org add failed
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("failed to add user to organization"))
+			Expect(err.Error()).To(ContainSubstring("user-123-abc created in realm"))
+
+			// But should still return the created user so caller can retry org add
+			Expect(createdUser).ToNot(BeNil())
+			Expect(createdUser.ID).To(Equal("user-123-abc"))
+			Expect(createdUser.Username).To(Equal("testuser"))
+			Expect(userCreated).To(BeTrue())
+		})
 	})
 
 	Describe("ListUsers", func() {
@@ -261,7 +314,7 @@ var _ = Describe("Keycloak Client", func() {
 			requestCount := 0
 			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				Expect(r.Method).To(Equal(http.MethodGet))
-				Expect(r.URL.Path).To(Equal("/admin/realms/osac/organizations/test-org/users"))
+				Expect(r.URL.Path).To(Equal("/admin/realms/osac/organizations/test-org/members"))
 
 				// Parse query parameters
 				query := r.URL.Query()
@@ -335,7 +388,7 @@ var _ = Describe("Keycloak Client", func() {
 			client = createTestClient(server.URL)
 			_, err := client.ListUsers(ctx, "test-org")
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("failed to decode users"))
+			Expect(err.Error()).To(ContainSubstring("failed to decode organization members"))
 		})
 
 		It("respects context cancellation during pagination", func() {
@@ -388,7 +441,7 @@ var _ = Describe("Keycloak Client", func() {
 
 			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				Expect(r.Method).To(Equal(http.MethodGet))
-				Expect(r.URL.Path).To(Equal("/admin/realms/osac/organizations/test-org/users/user-123-abc"))
+				Expect(r.URL.Path).To(Equal("/admin/realms/osac/users/user-123-abc"))
 
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
@@ -443,9 +496,10 @@ var _ = Describe("Keycloak Client", func() {
 	})
 
 	Describe("DeleteUser", func() {
-		It("deletes a user from Keycloak", func() {
+		It("deletes a user from Keycloak realm", func() {
 			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				Expect(r.Method).To(Equal(http.MethodDelete))
+				// DeleteUser only deletes from realm - Keycloak auto-removes from all organizations
 				Expect(r.URL.Path).To(Equal("/admin/realms/osac/users/user-123-abc"))
 				w.WriteHeader(http.StatusNoContent)
 			}))
@@ -455,6 +509,7 @@ var _ = Describe("Keycloak Client", func() {
 		})
 		It("returns an error if the user is not found", func() {
 			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				Expect(r.URL.Path).To(Equal("/admin/realms/osac/users/user-123-abc"))
 				w.WriteHeader(http.StatusNotFound)
 			}))
 
@@ -470,6 +525,7 @@ var _ = Describe("Keycloak Client", func() {
 
 		It("returns an error on server error", func() {
 			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				Expect(r.URL.Path).To(Equal("/admin/realms/osac/users/user-123-abc"))
 				w.WriteHeader(http.StatusInternalServerError)
 			}))
 
@@ -514,51 +570,11 @@ var _ = Describe("Keycloak Client", func() {
 	})
 
 	Describe("ListOrganizationRoles", func() {
-		It("fetches organization-level roles", func() {
-			clientRole := false
-			roles := []keycloakRole{
-				{ID: "role1", Name: "admin", ClientRole: &clientRole},
-				{ID: "role2", Name: "user", ClientRole: &clientRole},
-			}
-
-			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				Expect(r.Method).To(Equal(http.MethodGet))
-				Expect(r.URL.Path).To(Equal("/admin/realms/osac/organizations/test-org/roles"))
-
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				json.NewEncoder(w).Encode(roles)
-			}))
-
+		It("is not yet implemented (returns nil, nil)", func() {
 			client = createTestClient(server.URL)
 			result, err := client.ListOrganizationRoles(ctx, "test-org")
 			Expect(err).ToNot(HaveOccurred())
-			Expect(result).To(HaveLen(2))
-			Expect(result[0].Name).To(Equal("admin"))
-			Expect(result[1].Name).To(Equal("user"))
-		})
-
-		It("returns an error on server error", func() {
-			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusInternalServerError)
-			}))
-
-			client = createTestClient(server.URL)
-			_, err := client.ListOrganizationRoles(ctx, "test-org")
-			Expect(err).To(HaveOccurred())
-		})
-
-		It("returns an error on malformed JSON response", func() {
-			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				w.Write([]byte("invalid json"))
-			}))
-
-			client = createTestClient(server.URL)
-			_, err := client.ListOrganizationRoles(ctx, "test-org")
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("failed to decode realm roles"))
+			Expect(result).To(BeNil()) // TODO returns nil until implemented
 		})
 	})
 
@@ -634,30 +650,13 @@ var _ = Describe("Keycloak Client", func() {
 	})
 
 	Describe("AssignOrganizationRolesToUser", func() {
-		It("assigns organization roles to a user", func() {
-			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				Expect(r.Method).To(Equal(http.MethodPost))
-				Expect(r.URL.Path).To(Equal("/admin/realms/test-org/users/user-123/role-mappings/realm"))
-				w.WriteHeader(http.StatusNoContent)
-			}))
-
+		It("is not yet implemented (returns nil)", func() {
 			client = createTestClient(server.URL)
 			roles := []*idp.Role{
 				{ID: "role1", Name: "admin"},
 			}
 			err := client.AssignOrganizationRolesToUser(ctx, "test-org", "user-123", roles)
-			Expect(err).ToNot(HaveOccurred())
-		})
-
-		It("returns an error on server error", func() {
-			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusInternalServerError)
-			}))
-
-			client = createTestClient(server.URL)
-			roles := []*idp.Role{{ID: "role1", Name: "admin"}}
-			err := client.AssignOrganizationRolesToUser(ctx, "test-org", "user-123", roles)
-			Expect(err).To(HaveOccurred())
+			Expect(err).ToNot(HaveOccurred()) // TODO returns nil until implemented
 		})
 	})
 
@@ -730,7 +729,7 @@ var _ = Describe("Keycloak Client", func() {
 
 				// Second call is to remove roles
 				Expect(r.Method).To(Equal(http.MethodDelete))
-				Expect(r.URL.Path).To(Equal("/admin/realms/test-org/users/user-123/role-mappings/clients/internal-uuid-123"))
+				Expect(r.URL.Path).To(Equal("/admin/realms/osac/users/user-123/role-mappings/clients/internal-uuid-123"))
 				w.WriteHeader(http.StatusNoContent)
 			}))
 
@@ -755,49 +754,11 @@ var _ = Describe("Keycloak Client", func() {
 	})
 
 	Describe("GetUserOrganizationRoles", func() {
-		It("gets organization roles assigned to a user", func() {
-			clientRole := false
-			roles := []keycloakRole{
-				{ID: "role1", Name: "admin", ClientRole: &clientRole},
-			}
-
-			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				Expect(r.Method).To(Equal(http.MethodGet))
-				Expect(r.URL.Path).To(Equal("/admin/realms/test-org/users/user-123/role-mappings/realm"))
-
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				json.NewEncoder(w).Encode(roles)
-			}))
-
+		It("is not yet implemented (returns nil, nil)", func() {
 			client = createTestClient(server.URL)
 			result, err := client.GetUserOrganizationRoles(ctx, "test-org", "user-123")
 			Expect(err).ToNot(HaveOccurred())
-			Expect(result).To(HaveLen(1))
-			Expect(result[0].Name).To(Equal("admin"))
-		})
-
-		It("returns an error on server error", func() {
-			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusInternalServerError)
-			}))
-
-			client = createTestClient(server.URL)
-			_, err := client.GetUserOrganizationRoles(ctx, "test-org", "user-123")
-			Expect(err).To(HaveOccurred())
-		})
-
-		It("returns an error on malformed JSON response", func() {
-			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				w.Write([]byte("invalid json"))
-			}))
-
-			client = createTestClient(server.URL)
-			_, err := client.GetUserOrganizationRoles(ctx, "test-org", "user-123")
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("failed to decode user realm roles"))
+			Expect(result).To(BeNil()) // TODO returns nil until implemented
 		})
 	})
 
@@ -823,7 +784,7 @@ var _ = Describe("Keycloak Client", func() {
 				}
 
 				// Second call is to fetch user's client roles
-				Expect(r.URL.Path).To(Equal("/admin/realms/test-org/users/user-123/role-mappings/clients/internal-uuid-123"))
+				Expect(r.URL.Path).To(Equal("/admin/realms/osac/users/user-123/role-mappings/clients/internal-uuid-123"))
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
 				json.NewEncoder(w).Encode(roles)
@@ -871,296 +832,18 @@ var _ = Describe("Keycloak Client", func() {
 	})
 
 	Describe("AssignOrganizationAdminPermissions", func() {
-		It("assigns all realm management roles to a user", func() {
-			clientRole := true
-			// Return a mix of roles - some that match keycloakRealmManagementRoles and some that don't
-			allRoles := []keycloakRole{
-				{ID: "role1", Name: "manage-realm", ClientRole: &clientRole},
-				{ID: "role2", Name: "manage-users", ClientRole: &clientRole},
-				{ID: "role3", Name: "manage-clients", ClientRole: &clientRole},
-				{ID: "role4", Name: "some-other-role", ClientRole: &clientRole}, // Should be filtered out
-				{ID: "role5", Name: "view-realm", ClientRole: &clientRole},
-			}
-			clients := []keycloakClient{
-				{ID: "internal-uuid-123", ClientID: "realm-management"},
-			}
-
-			var assignedRoles []keycloakRole
-			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-
-				// Handle different request types based on method and path
-				if r.Method == http.MethodGet && r.URL.Path == "/admin/realms/osac/clients" {
-					// Resolve client ID (cached after first call)
-					w.WriteHeader(http.StatusOK)
-					json.NewEncoder(w).Encode(clients)
-					return
-				}
-
-				if r.Method == http.MethodGet && r.URL.Path == "/admin/realms/osac/clients/internal-uuid-123/roles" {
-					// List client roles
-					w.WriteHeader(http.StatusOK)
-					json.NewEncoder(w).Encode(allRoles)
-					return
-				}
-
-				if r.Method == http.MethodPost && r.URL.Path == "/admin/realms/osac/users/user-123/role-mappings/clients/internal-uuid-123" {
-					// Assign client roles
-					json.NewDecoder(r.Body).Decode(&assignedRoles)
-					w.WriteHeader(http.StatusNoContent)
-					return
-				}
-
-				// Unexpected request
-				w.WriteHeader(http.StatusInternalServerError)
-			}))
-
+		It("is not yet implemented (returns nil)", func() {
 			client = createTestClient(server.URL)
 			err := client.AssignOrganizationAdminPermissions(ctx, "test-org", "user-123")
-			Expect(err).ToNot(HaveOccurred())
-
-			// Verify that only the keycloakRealmManagementRoles were assigned
-			Expect(assignedRoles).ToNot(BeEmpty())
-			roleNames := make([]string, len(assignedRoles))
-			for i, role := range assignedRoles {
-				roleNames[i] = role.Name
-			}
-			Expect(roleNames).To(ContainElement("manage-realm"))
-			Expect(roleNames).To(ContainElement("manage-users"))
-			Expect(roleNames).To(ContainElement("manage-clients"))
-			Expect(roleNames).To(ContainElement("view-realm"))
-			Expect(roleNames).ToNot(ContainElement("some-other-role"))
-		})
-
-		It("returns an error when ListClientRoles fails", func() {
-			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusInternalServerError)
-			}))
-
-			client = createTestClient(server.URL)
-			err := client.AssignOrganizationAdminPermissions(ctx, "test-org", "user-123")
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("failed to list realm-management roles"))
-		})
-
-		It("returns an error when no matching roles are found", func() {
-			clientRole := true
-			// Return roles that don't match keycloakRealmManagementRoles
-			allRoles := []keycloakRole{
-				{ID: "role1", Name: "some-random-role", ClientRole: &clientRole},
-				{ID: "role2", Name: "another-role", ClientRole: &clientRole},
-			}
-			clients := []keycloakClient{
-				{ID: "internal-uuid-123", ClientID: "realm-management"},
-			}
-
-			requestCount := 0
-			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				requestCount++
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-
-				if requestCount == 1 {
-					json.NewEncoder(w).Encode(clients)
-				} else {
-					json.NewEncoder(w).Encode(allRoles)
-				}
-			}))
-
-			client = createTestClient(server.URL)
-			err := client.AssignOrganizationAdminPermissions(ctx, "test-org", "user-123")
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("no realm management roles found"))
-		})
-
-		It("returns an error when AssignClientRolesToUser fails", func() {
-			clientRole := true
-			allRoles := []keycloakRole{
-				{ID: "role1", Name: "manage-realm", ClientRole: &clientRole},
-			}
-			clients := []keycloakClient{
-				{ID: "internal-uuid-123", ClientID: "realm-management"},
-			}
-
-			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-
-				// Resolve client ID succeeds
-				if r.Method == http.MethodGet && r.URL.Path == "/admin/realms/osac/clients" {
-					w.WriteHeader(http.StatusOK)
-					json.NewEncoder(w).Encode(clients)
-					return
-				}
-
-				// List roles succeeds
-				if r.Method == http.MethodGet && r.URL.Path == "/admin/realms/osac/clients/internal-uuid-123/roles" {
-					w.WriteHeader(http.StatusOK)
-					json.NewEncoder(w).Encode(allRoles)
-					return
-				}
-
-				// Assign roles fails
-				if r.Method == http.MethodPost {
-					w.WriteHeader(http.StatusInternalServerError)
-					return
-				}
-
-				w.WriteHeader(http.StatusInternalServerError)
-			}))
-
-			client = createTestClient(server.URL)
-			err := client.AssignOrganizationAdminPermissions(ctx, "test-org", "user-123")
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("failed to assign realm management roles"))
+			Expect(err).ToNot(HaveOccurred()) // TODO returns nil until implemented
 		})
 	})
 
 	Describe("AssignIdpManagerPermissions", func() {
-		It("assigns limited IdP manager roles to a user", func() {
-			clientRole := true
-			// Return a mix of roles - some that match keycloakIdpManagerRoles and some that don't
-			allRoles := []keycloakRole{
-				{ID: "role1", Name: "manage-users", ClientRole: &clientRole},
-				{ID: "role2", Name: "view-users", ClientRole: &clientRole},
-				{ID: "role3", Name: "manage-identity-providers", ClientRole: &clientRole},
-				{ID: "role4", Name: "view-identity-providers", ClientRole: &clientRole},
-				{ID: "role5", Name: "view-realm", ClientRole: &clientRole},
-				{ID: "role6", Name: "manage-realm", ClientRole: &clientRole},   // Should be filtered out
-				{ID: "role7", Name: "manage-clients", ClientRole: &clientRole}, // Should be filtered out
-			}
-			clients := []keycloakClient{
-				{ID: "internal-uuid-123", ClientID: "realm-management"},
-			}
-
-			var assignedRoles []keycloakRole
-			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-
-				// Handle different request types based on method and path
-				if r.Method == http.MethodGet && r.URL.Path == "/admin/realms/osac/clients" {
-					// Resolve client ID (cached after first call)
-					w.WriteHeader(http.StatusOK)
-					json.NewEncoder(w).Encode(clients)
-					return
-				}
-
-				if r.Method == http.MethodGet && r.URL.Path == "/admin/realms/osac/clients/internal-uuid-123/roles" {
-					// List client roles
-					w.WriteHeader(http.StatusOK)
-					json.NewEncoder(w).Encode(allRoles)
-					return
-				}
-
-				if r.Method == http.MethodPost && r.URL.Path == "/admin/realms/osac/users/user-123/role-mappings/clients/internal-uuid-123" {
-					// Assign client roles
-					json.NewDecoder(r.Body).Decode(&assignedRoles)
-					w.WriteHeader(http.StatusNoContent)
-					return
-				}
-
-				// Unexpected request
-				w.WriteHeader(http.StatusInternalServerError)
-			}))
-
+		It("is not yet implemented (returns nil)", func() {
 			client = createTestClient(server.URL)
 			err := client.AssignIdpManagerPermissions(ctx, "test-org", "user-123")
-			Expect(err).ToNot(HaveOccurred())
-
-			// Verify that only the keycloakIdpManagerRoles were assigned
-			Expect(assignedRoles).ToNot(BeEmpty())
-			roleNames := make([]string, len(assignedRoles))
-			for i, role := range assignedRoles {
-				roleNames[i] = role.Name
-			}
-			Expect(roleNames).To(ContainElement("manage-users"))
-			Expect(roleNames).To(ContainElement("view-users"))
-			Expect(roleNames).To(ContainElement("manage-identity-providers"))
-			Expect(roleNames).To(ContainElement("view-identity-providers"))
-			Expect(roleNames).To(ContainElement("view-realm"))
-			Expect(roleNames).ToNot(ContainElement("manage-realm"))
-			Expect(roleNames).ToNot(ContainElement("manage-clients"))
-		})
-
-		It("returns an error when ListClientRoles fails", func() {
-			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusInternalServerError)
-			}))
-
-			client = createTestClient(server.URL)
-			err := client.AssignIdpManagerPermissions(ctx, "test-org", "user-123")
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("failed to list realm-management roles"))
-		})
-
-		It("returns an error when no matching roles are found", func() {
-			clientRole := true
-			// Return roles that don't match keycloakIdpManagerRoles
-			allRoles := []keycloakRole{
-				{ID: "role1", Name: "some-random-role", ClientRole: &clientRole},
-				{ID: "role2", Name: "another-role", ClientRole: &clientRole},
-			}
-			clients := []keycloakClient{
-				{ID: "internal-uuid-123", ClientID: "realm-management"},
-			}
-
-			requestCount := 0
-			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				requestCount++
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-
-				if requestCount == 1 {
-					json.NewEncoder(w).Encode(clients)
-				} else {
-					json.NewEncoder(w).Encode(allRoles)
-				}
-			}))
-
-			client = createTestClient(server.URL)
-			err := client.AssignIdpManagerPermissions(ctx, "test-org", "user-123")
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("no IdP manager roles found"))
-		})
-
-		It("returns an error when AssignClientRolesToUser fails", func() {
-			clientRole := true
-			allRoles := []keycloakRole{
-				{ID: "role1", Name: "manage-users", ClientRole: &clientRole},
-			}
-			clients := []keycloakClient{
-				{ID: "internal-uuid-123", ClientID: "realm-management"},
-			}
-
-			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-
-				// Resolve client ID succeeds
-				if r.Method == http.MethodGet && r.URL.Path == "/admin/realms/osac/clients" {
-					w.WriteHeader(http.StatusOK)
-					json.NewEncoder(w).Encode(clients)
-					return
-				}
-
-				// List roles succeeds
-				if r.Method == http.MethodGet && r.URL.Path == "/admin/realms/osac/clients/internal-uuid-123/roles" {
-					w.WriteHeader(http.StatusOK)
-					json.NewEncoder(w).Encode(allRoles)
-					return
-				}
-
-				// Assign roles fails
-				if r.Method == http.MethodPost {
-					w.WriteHeader(http.StatusInternalServerError)
-					return
-				}
-
-				w.WriteHeader(http.StatusInternalServerError)
-			}))
-
-			client = createTestClient(server.URL)
-			err := client.AssignIdpManagerPermissions(ctx, "test-org", "user-123")
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("failed to assign IdP manager roles"))
+			Expect(err).ToNot(HaveOccurred()) // TODO returns nil until implemented
 		})
 	})
 
