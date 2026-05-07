@@ -354,7 +354,7 @@ func (r *runnerContext) run(cmd *cobra.Command, argv []string) error {
 		return fmt.Errorf("failed to create hub cache: %w", err)
 	}
 
-	// Create the IDP manager if configured:
+	// Create the IDP manager:
 	idpManager, err := r.createIDPManager(ctx, caPool)
 	if err != nil {
 		return err
@@ -691,44 +691,42 @@ func (r *runnerContext) run(cmd *cobra.Command, argv []string) error {
 		}
 	}()
 
-	// Create the organization reconciler if IDP is configured:
-	if idpManager != nil {
-		r.logger.InfoContext(ctx, "Creating organization reconciler")
-		organizationReconcilerFunction, err := organization.NewFunction().
-			SetLogger(r.logger).
-			SetConnection(r.client).
-			SetIdpManager(idpManager).
-			Build()
-		if err != nil {
-			return fmt.Errorf("failed to create organization reconciler function: %w", err)
-		}
-		organizationReconciler, err := controllers.NewReconciler[*privatev1.Organization]().
-			SetLogger(r.logger).
-			SetName("organization").
-			SetClient(r.client).
-			SetFunction(organizationReconcilerFunction.Run).
-			SetEventFilter("has(event.organization)").
-			SetHealthReporter(healthAggregator).
-			Build()
-		if err != nil {
-			return fmt.Errorf("failed to create organization reconciler: %w", err)
-		}
-
-		// Start the organization reconciler:
-		r.logger.InfoContext(ctx, "Starting organization reconciler")
-		go func() {
-			err := organizationReconciler.Start(ctx)
-			if err == nil || errors.Is(err, context.Canceled) {
-				r.logger.InfoContext(ctx, "Organization reconciler finished")
-			} else {
-				r.logger.InfoContext(
-					ctx,
-					"Organization reconciler failed",
-					slog.Any("error", err),
-				)
-			}
-		}()
+	// Create the organization reconciler:
+	r.logger.InfoContext(ctx, "Creating organization reconciler")
+	organizationReconcilerFunction, err := organization.NewFunction().
+		SetLogger(r.logger).
+		SetConnection(r.client).
+		SetIdpManager(idpManager).
+		Build()
+	if err != nil {
+		return fmt.Errorf("failed to create organization reconciler function: %w", err)
 	}
+	organizationReconciler, err := controllers.NewReconciler[*privatev1.Organization]().
+		SetLogger(r.logger).
+		SetName("organization").
+		SetClient(r.client).
+		SetFunction(organizationReconcilerFunction.Run).
+		SetEventFilter("has(event.organization)").
+		SetHealthReporter(healthAggregator).
+		Build()
+	if err != nil {
+		return fmt.Errorf("failed to create organization reconciler: %w", err)
+	}
+
+	// Start the organization reconciler:
+	r.logger.InfoContext(ctx, "Starting organization reconciler")
+	go func() {
+		err := organizationReconciler.Start(ctx)
+		if err == nil || errors.Is(err, context.Canceled) {
+			r.logger.InfoContext(ctx, "Organization reconciler finished")
+		} else {
+			r.logger.InfoContext(
+				ctx,
+				"Organization reconciler failed",
+				slog.Any("error", err),
+			)
+		}
+	}()
 
 	// Create the metrics listener:
 	r.logger.InfoContext(ctx, "Creating metrics listener")
@@ -867,15 +865,16 @@ func (r *runnerContext) createTokenSource(ctx context.Context, caPool *x509.Cert
 	return
 }
 
-// createIDPManager creates the IDP client and organization manager if IDP is configured.
-// Returns nil if IDP is not configured (not an error).
+// createIDPManager creates the IDP client and organization manager. The IDP URL and credentials are mandatory.
 func (r *runnerContext) createIDPManager(ctx context.Context, caPool *x509.CertPool) (*idp.OrganizationManager, error) {
-	// Check if IDP is configured (need URL and credentials)
-	hasClientId := r.args.idpClientId != "" || r.args.idpClientIdFile != ""
-	hasClientSecret := r.args.idpClientSecret != "" || r.args.idpClientSecretFile != ""
-	if r.args.idpURL == "" || !hasClientId || !hasClientSecret {
-		r.logger.InfoContext(ctx, "IDP not configured, organization controller will not be started")
-		return nil, nil
+	if r.args.idpURL == "" {
+		return nil, fmt.Errorf("flag '--idp-url' is required")
+	}
+	if r.args.idpClientId == "" && r.args.idpClientIdFile == "" {
+		return nil, fmt.Errorf("flag '--idp-client-id' or '--idp-client-id-file' is required")
+	}
+	if r.args.idpClientSecret == "" && r.args.idpClientSecretFile == "" {
+		return nil, fmt.Errorf("flag '--idp-client-secret' or '--idp-client-secret-file' is required")
 	}
 
 	// Get the client ID

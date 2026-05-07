@@ -1034,7 +1034,6 @@ database:
         param: sslrootcert
 
 idp:
-  enabled: true
   provider: keycloak
   url: https://keycloak-keycloak.${DOMAIN}
   credentials:

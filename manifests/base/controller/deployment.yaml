@@ -39,7 +39,6 @@ spec:
       - name: idp-credentials
         secret:
           secretName: fulfillment-controller-credentials
-          optional: true
       containers:
       - name: controller
         image: fulfillment-service

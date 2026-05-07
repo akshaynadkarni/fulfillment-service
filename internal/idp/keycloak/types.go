@@ -57,11 +57,17 @@ type keycloakRole struct {
 }
 
 type keycloakOrganization struct {
-	ID         string              `json:"id,omitempty"`
-	Name       string              `json:"name,omitempty"`
-	Alias      string              `json:"alias,omitempty"`
-	Enabled    *bool               `json:"enabled,omitempty"`
-	Attributes map[string][]string `json:"attributes,omitempty"`
+	ID         string                        `json:"id,omitempty"`
+	Name       string                        `json:"name,omitempty"`
+	Alias      string                        `json:"alias,omitempty"`
+	Enabled    *bool                         `json:"enabled,omitempty"`
+	Attributes map[string][]string           `json:"attributes,omitempty"`
+	Domains    []*keycloakOrganizationDomain `json:"domains,omitempty"`
+}
+
+type keycloakOrganizationDomain struct {
+	Name     string `json:"name,omitempty"`
+	Verified bool   `json:"verified,omitempty"`
 }
 
 // Conversion functions from generic types to Keycloak types
@@ -176,6 +182,9 @@ func toKeycloakOrganization(org *idp.Organization) *keycloakOrganization {
 		Name:       org.Name,
 		Enabled:    &enabled,
 		Attributes: org.Attributes,
+		Domains: []*keycloakOrganizationDomain{{
+			Name: org.Name,
+		}},
 	}
 }
 

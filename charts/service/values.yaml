@@ -146,19 +146,16 @@ database:
   # `uri` key but the connection parameter name is `url`.
   connection: []
 
-# Identity provider configuration (optional). When enabled, the controller will start the organization reconciler
-# to manage organizations in the identity provider.
+# Identity provider configuration. The controller uses this to manage organizations in the identity provider via the
+# organization reconciler. This parameter is mandatory.
 idp:
-
-  # Enable IDP integration for organization management. When disabled, the organization controller will not start.
-  # The default is false.
-  enabled: false
 
   # IDP provider type. Currently only 'keycloak' is supported.
   provider: keycloak
 
-  # Base URL of the identity provider (e.g., https://keycloak.keycloak.svc.cluster.local:8000)
-  url: ""
+  # Base URL of the identity provider (e.g., https://keycloak.keycloak.svc.cluster.local:8000). This parameter is
+  # mandatory.
+  url:
 
   # List of sources for the IDP OAuth client credentials. The controller uses the OAuth client credentials flow to
   # authenticate with the identity provider's admin API. The credentials must have sufficient privileges to manage
@@ -180,5 +177,5 @@ idp:
   # You can reuse the same credentials as auth.controllerCredentials if the osac-controller service account has both
   # API access and IDP management permissions, or use a separate secret for separation of concerns.
   #
-  # The default value is an empty list, meaning no credentials are configured.
-  credentials: []
+  # This parameter is mandatory.
+  credentials:
