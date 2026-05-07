@@ -36,19 +36,16 @@ $ kubectl create secret generic fulfillment-controller-credentials \
 If you need to use a different secret name or different keys, you can override the volume definition
 in the controller deployment using a kustomize patch in your overlay.
 
-## Enabling IDP Integration (Optional)
+## IDP Integration
 
 The kustomize manifests include the IDP configuration flags by default, pointing to
 `https://keycloak.keycloak.svc.cluster.local:8000`. The controller uses OAuth client credentials
-flow to authenticate with the identity provider's admin API.
+flow to authenticate with the identity provider's admin API to manage organizations.
 
 By default, the IDP integration reuses the same `fulfillment-controller-credentials` secret (with
 keys `client-id` and `client-secret`) that is already configured for API authentication. The
 `osac-controller` service account has both API access permissions and the required IDP
 realm-management roles (manage-realm, manage-users, view-realm, view-users).
-
-**No additional setup is needed** - the organization controller will automatically start if the
-`fulfillment-controller-credentials` secret exists.
 
 If you want to use separate credentials for IDP (for better separation of concerns), you can create
 a kustomize patch to override the `idp-credentials` volume:
@@ -68,7 +65,6 @@ patches:
           - name: idp-credentials
             secret:
               secretName: fulfillment-idp-credentials
-              optional: true
 ```
 
 Then create the separate secret:
@@ -79,10 +75,6 @@ $ kubectl create secret generic fulfillment-idp-credentials \
 --from-literal=client-id=osac-idp-manager \
 --from-literal=client-secret=...
 ```
-
-If neither the reused credentials nor separate IDP credentials are available, the controller will
-log that IDP is not configured and will not start the organization controller. The volume is marked
-as optional, so the pod will start successfully.
 
 ## OpenShift
 

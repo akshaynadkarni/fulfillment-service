@@ -160,22 +160,34 @@ func (c *Client) CreateOrganization(ctx context.Context, org *idp.Organization) 
 
 // GetOrganization retrieves an organization (Keycloak organization in the configured realm) by name.
 func (c *Client) GetOrganization(ctx context.Context, name string) (*idp.Organization, error) {
-	response, err := c.httpClient.DoRequest(ctx, http.MethodGet, fmt.Sprintf("/admin/realms/%s/organizations/%s", c.realmName, url.PathEscape(name)), nil)
+	query := url.Values{}
+	query.Add("search", name)
+	query.Add("exact", "true")
+	path := fmt.Sprintf("/admin/realms/%s/organizations?%s", c.realmName, query.Encode())
+	response, err := c.httpClient.DoRequest(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get organization: %w", err)
 	}
 	defer response.Body.Close()
 
-	var kcOrg keycloakOrganization
-	if err = json.NewDecoder(response.Body).Decode(&kcOrg); err != nil {
+	var kcOrgs []keycloakOrganization
+	if err = json.NewDecoder(response.Body).Decode(&kcOrgs); err != nil {
 		return nil, fmt.Errorf("failed to decode organization response: %w", err)
 	}
+	if len(kcOrgs) == 0 {
+		return nil, fmt.Errorf("organization %q not found", name)
+	}
+	kcOrg := kcOrgs[0]
 	return fromKeycloakOrganization(&kcOrg), nil
 }
 
 // DeleteOrganization deletes an organization (Keycloak organization in the configured realm) by name.
 func (c *Client) DeleteOrganization(ctx context.Context, organizationName string) error {
-	response, err := c.httpClient.DoRequest(ctx, http.MethodDelete, fmt.Sprintf("/admin/realms/%s/organizations/%s", c.realmName, url.PathEscape(organizationName)), nil)
+	org, err := c.GetOrganization(ctx, organizationName)
+	if err != nil {
+		return fmt.Errorf("failed to get organization: %w", err)
+	}
+	response, err := c.httpClient.DoRequest(ctx, http.MethodDelete, fmt.Sprintf("/admin/realms/%s/organizations/%s", c.realmName, org.ID), nil)
 	if err != nil {
 		return fmt.Errorf("failed to delete organization: %w", err)
 	}
@@ -185,7 +197,12 @@ func (c *Client) DeleteOrganization(ctx context.Context, organizationName string
 }
 
 func (c *Client) AddUserToOrganization(ctx context.Context, organizationName string, userID string) error {
-	response, err := c.httpClient.DoRequest(ctx, http.MethodPost, fmt.Sprintf("/admin/realms/%s/organizations/%s/members", c.realmName, url.PathEscape(organizationName)), userID)
+	org, err := c.GetOrganization(ctx, organizationName)
+	if err != nil {
+		return fmt.Errorf("failed to get organization: %w", err)
+	}
+	path := fmt.Sprintf("/admin/realms/%s/organizations/%s/members", c.realmName, org.ID)
+	response, err := c.httpClient.DoRequest(ctx, http.MethodPost, path, userID)
 	if err != nil {
 		return fmt.Errorf("failed to add user to organization: %w", err)
 	}

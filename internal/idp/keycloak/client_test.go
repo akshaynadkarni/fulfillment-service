@@ -58,15 +58,15 @@ var _ = Describe("Keycloak Client", func() {
 					return
 				}
 
-				if r.Method == http.MethodGet && r.URL.Path == "/admin/realms/osac/organizations/test-org" {
+				if r.Method == http.MethodGet && r.URL.Path == "/admin/realms/osac/organizations" && r.URL.RawQuery == "exact=true&search=test-org" {
 					// Get request to verify creation
 					enabled := true
-					response := keycloakOrganization{
+					response := []keycloakOrganization{{
 						ID:      "org-uuid-123",
 						Name:    "test-org",
 						Alias:   "Test Organization",
 						Enabled: &enabled,
-					}
+					}}
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusOK)
 					json.NewEncoder(w).Encode(response)
@@ -130,20 +130,21 @@ var _ = Describe("Keycloak Client", func() {
 	Describe("GetOrganization", func() {
 		It("retrieves an organization from Keycloak", func() {
 			enabled := true
-			testOrg := &keycloakOrganization{
+			testOrgs := []keycloakOrganization{{
 				ID:      "org-id",
 				Name:    "test-org",
 				Alias:   "Test Organization",
 				Enabled: &enabled,
-			}
+			}}
 
 			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				Expect(r.Method).To(Equal(http.MethodGet))
-				Expect(r.URL.Path).To(Equal("/admin/realms/osac/organizations/test-org"))
+				Expect(r.URL.Path).To(Equal("/admin/realms/osac/organizations"))
+				Expect(r.URL.RawQuery).To(Equal("exact=true&search=test-org"))
 
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
-				json.NewEncoder(w).Encode(testOrg)
+				json.NewEncoder(w).Encode(testOrgs)
 			}))
 
 			client = createTestClient(server.URL)
@@ -191,8 +192,23 @@ var _ = Describe("Keycloak Client", func() {
 					return
 				}
 
-				// Second request: add user to organization
-				if r.Method == http.MethodPost && r.URL.Path == "/admin/realms/osac/organizations/test-org/members" {
+				// Second request: get organization by name
+				if r.Method == http.MethodGet && r.URL.Path == "/admin/realms/osac/organizations" && r.URL.RawQuery == "exact=true&search=test-org" {
+					enabled := true
+					response := []keycloakOrganization{{
+						ID:      "org-id",
+						Name:    "test-org",
+						Alias:   "Test Organization",
+						Enabled: &enabled,
+					}}
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					json.NewEncoder(w).Encode(response)
+					return
+				}
+
+				// Third request: add user to organization
+				if r.Method == http.MethodPost && r.URL.Path == "/admin/realms/osac/organizations/org-id/members" {
 					json.NewDecoder(r.Body).Decode(&addedUserID)
 					w.WriteHeader(http.StatusNoContent)
 					return
@@ -538,9 +554,28 @@ var _ = Describe("Keycloak Client", func() {
 	Describe("DeleteOrganization", func() {
 		It("deletes an organization from Keycloak", func() {
 			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				Expect(r.Method).To(Equal(http.MethodDelete))
-				Expect(r.URL.Path).To(Equal("/admin/realms/osac/organizations/test-org"))
-				w.WriteHeader(http.StatusNoContent)
+				// Second request: get organization by name
+				if r.Method == http.MethodGet && r.URL.Path == "/admin/realms/osac/organizations" && r.URL.RawQuery == "exact=true&search=test-org" {
+					enabled := true
+					response := []keycloakOrganization{{
+						ID:      "org-id",
+						Name:    "test-org",
+						Alias:   "Test Organization",
+						Enabled: &enabled,
+					}}
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					json.NewEncoder(w).Encode(response)
+					return
+				}
+
+				// Second request: delete organization
+				if r.Method == http.MethodDelete && r.URL.Path == "/admin/realms/osac/organizations/org-id" {
+					w.WriteHeader(http.StatusNoContent)
+					return
+				}
+
+				w.WriteHeader(http.StatusBadRequest)
 			}))
 
 			client = createTestClient(server.URL)
