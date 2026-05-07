@@ -555,7 +555,7 @@
     "authenticationFlowBindingOverrides" : { },
     "fullScopeAllowed" : true,
     "nodeReRegistrationTimeout" : -1,
-    "defaultClientScopes" : [ "groups", "basic", "username" ],
+    "defaultClientScopes" : [ "groups", "basic", "username", "organization" ],
     "optionalClientScopes" : [ ]
   }, {
     "id" : "e37d4620-4ae2-432e-90d8-2b7f6a662f43",
