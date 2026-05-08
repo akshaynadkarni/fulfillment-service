@@ -183,6 +183,12 @@ func (c *Client) GetOrganization(ctx context.Context, name string) (*idp.Organiz
 
 // DeleteOrganization deletes an organization (Keycloak organization in the configured realm) by name.
 func (c *Client) DeleteOrganization(ctx context.Context, organizationName string) error {
+	// Delete the break-glass account first (Keycloak-specific: it belongs to realm, not organization)
+	breakGlassUsername := fmt.Sprintf("%s-osac-break-glass", organizationName)
+	if err := c.deleteBreakGlassAccount(ctx, organizationName, breakGlassUsername); err != nil {
+		return fmt.Errorf("failed to delete break-glass account: %w", err)
+	}
+
 	org, err := c.GetOrganization(ctx, organizationName)
 	if err != nil {
 		return fmt.Errorf("failed to get organization: %w", err)
@@ -571,5 +577,57 @@ func (c *Client) AssignOrganizationAdminPermissions(ctx context.Context, organiz
 // organization settings, realm settings, or authorization policies.
 func (c *Client) AssignIdpManagerPermissions(ctx context.Context, organizationName, userID string) error {
 	// TODO: implement function
+	return nil
+}
+
+// getUserByUsername retrieves a user by username from the realm.
+// Returns nil if the user is not found.
+func (c *Client) getUserByUsername(ctx context.Context, username string) (*idp.User, error) {
+	query := url.Values{}
+	query.Add("username", username)
+	query.Add("exact", "true")
+	path := fmt.Sprintf("/admin/realms/%s/users?%s", c.realmName, query.Encode())
+
+	response, err := c.httpClient.DoRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query user by username: %w", err)
+	}
+	defer response.Body.Close()
+
+	var kcUsers []keycloakUser
+	if err = json.NewDecoder(response.Body).Decode(&kcUsers); err != nil {
+		return nil, fmt.Errorf("failed to decode user query response: %w", err)
+	}
+
+	if len(kcUsers) == 0 {
+		// User not found - return nil without error
+		return nil, nil
+	}
+
+	return fromKeycloakUser(&kcUsers[0]), nil
+}
+
+// deleteBreakGlassAccount is a Keycloak-specific helper that deletes the break-glass account.
+// In Keycloak, the break-glass account belongs to the realm (not the organization),
+// so it must be explicitly deleted and won't be cascade-deleted with the organization.
+func (c *Client) deleteBreakGlassAccount(ctx context.Context, organizationName, breakGlassUsername string) error {
+	// Query for the break-glass user by username
+	user, err := c.getUserByUsername(ctx, breakGlassUsername)
+	if err != nil {
+		return fmt.Errorf("failed to get user by username: %w", err)
+	}
+
+	if user == nil {
+		// Break-glass account not found - may have been already deleted
+		// This is not an error, just return success
+		return nil
+	}
+
+	// Delete the break-glass user
+	err = c.DeleteUser(ctx, organizationName, user.ID)
+	if err != nil {
+		return fmt.Errorf("failed to delete break-glass user: %w", err)
+	}
+
 	return nil
 }

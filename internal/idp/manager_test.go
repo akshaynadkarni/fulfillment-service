@@ -54,6 +54,16 @@ func (m *mockClient) DeleteOrganization(ctx context.Context, name string) error 
 	if m.failOrgDeletion {
 		return fmt.Errorf("simulated organization deletion failure")
 	}
+
+	// Simulate Keycloak behavior: delete break-glass account first
+	breakGlassUsername := fmt.Sprintf("%s-osac-break-glass", name)
+	for _, user := range m.createdUsers {
+		if user.Username == breakGlassUsername {
+			m.deletedUsers = append(m.deletedUsers, user.ID)
+			break
+		}
+	}
+
 	m.deletedRealm = name
 	return nil
 }
