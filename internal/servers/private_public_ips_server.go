@@ -39,6 +39,7 @@ var validPublicIPTransitions = map[privatev1.PublicIPState][]privatev1.PublicIPS
 	privatev1.PublicIPState_PUBLIC_IP_STATE_ATTACHING: {privatev1.PublicIPState_PUBLIC_IP_STATE_ATTACHED, privatev1.PublicIPState_PUBLIC_IP_STATE_FAILED},
 	privatev1.PublicIPState_PUBLIC_IP_STATE_ATTACHED:  {privatev1.PublicIPState_PUBLIC_IP_STATE_RELEASING, privatev1.PublicIPState_PUBLIC_IP_STATE_FAILED},
 	privatev1.PublicIPState_PUBLIC_IP_STATE_RELEASING: {privatev1.PublicIPState_PUBLIC_IP_STATE_ALLOCATED, privatev1.PublicIPState_PUBLIC_IP_STATE_FAILED},
+	privatev1.PublicIPState_PUBLIC_IP_STATE_FAILED:    {privatev1.PublicIPState_PUBLIC_IP_STATE_ALLOCATED, privatev1.PublicIPState_PUBLIC_IP_STATE_ATTACHED},
 }
 
 // PrivatePublicIPsServerBuilder contains the data and logic needed to create a PrivatePublicIPsServer.

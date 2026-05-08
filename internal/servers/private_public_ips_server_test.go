@@ -707,9 +707,47 @@ var _ = Describe("Private public IPs server", func() {
 			Expect(updated.GetStatus().GetState()).To(Equal(privatev1.PublicIPState_PUBLIC_IP_STATE_FAILED))
 		})
 
+		It("accepts FAILED to ALLOCATED transition", func() {
+			object := createPublicIPInState(publicIPsServer, privatev1.PublicIPState_PUBLIC_IP_STATE_FAILED)
+			updated := transitionTo(object, privatev1.PublicIPState_PUBLIC_IP_STATE_ALLOCATED)
+			Expect(updated.GetStatus().GetState()).To(Equal(privatev1.PublicIPState_PUBLIC_IP_STATE_ALLOCATED))
+		})
+
+		It("accepts FAILED to ATTACHED transition", func() {
+			object := createPublicIPInState(publicIPsServer, privatev1.PublicIPState_PUBLIC_IP_STATE_FAILED)
+			updated := transitionTo(object, privatev1.PublicIPState_PUBLIC_IP_STATE_ATTACHED)
+			Expect(updated.GetStatus().GetState()).To(Equal(privatev1.PublicIPState_PUBLIC_IP_STATE_ATTACHED))
+		})
+
 		It("rejects FAILED to PENDING transition", func() {
 			object := createPublicIPInState(publicIPsServer, privatev1.PublicIPState_PUBLIC_IP_STATE_FAILED)
 			setStateOnObject(object, privatev1.PublicIPState_PUBLIC_IP_STATE_PENDING)
+			_, err := publicIPsServer.Update(ctx, privatev1.PublicIPsUpdateRequest_builder{
+				Object: object,
+			}.Build())
+			Expect(err).To(HaveOccurred())
+			status, ok := grpcstatus.FromError(err)
+			Expect(ok).To(BeTrue())
+			Expect(status.Code()).To(Equal(grpccodes.FailedPrecondition))
+			Expect(err.Error()).To(ContainSubstring("invalid state transition"))
+		})
+
+		It("rejects FAILED to ATTACHING transition", func() {
+			object := createPublicIPInState(publicIPsServer, privatev1.PublicIPState_PUBLIC_IP_STATE_FAILED)
+			setStateOnObject(object, privatev1.PublicIPState_PUBLIC_IP_STATE_ATTACHING)
+			_, err := publicIPsServer.Update(ctx, privatev1.PublicIPsUpdateRequest_builder{
+				Object: object,
+			}.Build())
+			Expect(err).To(HaveOccurred())
+			status, ok := grpcstatus.FromError(err)
+			Expect(ok).To(BeTrue())
+			Expect(status.Code()).To(Equal(grpccodes.FailedPrecondition))
+			Expect(err.Error()).To(ContainSubstring("invalid state transition"))
+		})
+
+		It("rejects FAILED to RELEASING transition", func() {
+			object := createPublicIPInState(publicIPsServer, privatev1.PublicIPState_PUBLIC_IP_STATE_FAILED)
+			setStateOnObject(object, privatev1.PublicIPState_PUBLIC_IP_STATE_RELEASING)
 			_, err := publicIPsServer.Update(ctx, privatev1.PublicIPsUpdateRequest_builder{
 				Object: object,
 			}.Build())
