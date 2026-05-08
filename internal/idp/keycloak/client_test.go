@@ -895,10 +895,32 @@ var _ = Describe("Keycloak Client", func() {
 	})
 
 	Describe("AssignIdpManagerPermissions", func() {
-		It("is not yet implemented (returns nil)", func() {
+		It("assigns tenant-idp-manager role to user", func() {
+			clientRole := false
+			role := keycloakRole{
+				ID:         "role-idp-manager",
+				Name:       "tenant-idp-manager",
+				ClientRole: &clientRole,
+			}
+
+			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+
+				if r.Method == http.MethodGet && r.URL.Path == "/admin/realms/osac/roles/tenant-idp-manager" {
+					// Return the tenant-idp-manager role
+					w.WriteHeader(http.StatusOK)
+					json.NewEncoder(w).Encode(role)
+				} else if r.Method == http.MethodPost && r.URL.Path == "/admin/realms/osac/users/user-123/role-mappings/realm" {
+					// Assignment endpoint
+					w.WriteHeader(http.StatusNoContent)
+				} else {
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+
 			client = createTestClient(server.URL)
-			err := client.AssignIdpManagerPermissions(ctx, "test-org", "user-123")
-			Expect(err).ToNot(HaveOccurred()) // TODO returns nil until implemented
+			err := client.AssignIdpManagerPermissions(ctx, "user-123")
+			Expect(err).ToNot(HaveOccurred())
 		})
 	})
 

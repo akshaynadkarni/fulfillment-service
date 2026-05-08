@@ -200,7 +200,7 @@ func (m *mockClient) AssignOrganizationAdminPermissions(ctx context.Context, org
 	return m.AssignClientRolesToUser(ctx, organization, userID, "realm-management", roles)
 }
 
-func (m *mockClient) AssignIdpManagerPermissions(ctx context.Context, organization, userID string) error {
+func (m *mockClient) AssignIdpManagerPermissions(ctx context.Context, userID string) error {
 	if m.failRoleAssignment {
 		return fmt.Errorf("simulated role assignment failure")
 	}
@@ -212,7 +212,8 @@ func (m *mockClient) AssignIdpManagerPermissions(ctx context.Context, organizati
 		{ID: "10", Name: "view-identity-providers", ClientRole: true},
 		{ID: "7", Name: "view-realm", ClientRole: true},
 	}
-	return m.AssignClientRolesToUser(ctx, organization, userID, "realm-management", roles)
+	// Use empty organization name since it's no longer a parameter
+	return m.AssignClientRolesToUser(ctx, "", userID, "realm-management", roles)
 }
 
 var _ = Describe("OrganizationManager", func() {

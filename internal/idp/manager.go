@@ -168,7 +168,7 @@ func (m *OrganizationManager) CreateOrganization(ctx context.Context, config *Or
 	}
 
 	// Step 3: Assign IdP manager permissions to break-glass account
-	err = m.assignIdpManagerPermissions(ctx, createdOrg.Name, credentials.UserID)
+	err = m.assignIdpManagerPermissions(ctx, credentials.UserID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to assign IdP manager permissions: %w", err)
 	}
@@ -281,21 +281,20 @@ func (m *OrganizationManager) createBreakGlassAccount(ctx context.Context, confi
 }
 
 // assignIdpManagerPermissions assigns limited IdP manager permissions to a user.
-// This grants the user permissions to manage users and identity providers but not
+// This grants the user permissions to manage user roles and identity providers but not
 // critical realm settings.
-func (m *OrganizationManager) assignIdpManagerPermissions(ctx context.Context, organizationName, userID string) error {
+// The implementation is provider-specific (delegated to the IdP client).
+func (m *OrganizationManager) assignIdpManagerPermissions(ctx context.Context, userID string) error {
 	m.logger.InfoContext(ctx, "Assigning IdP manager permissions to user",
-		slog.String("organization", organizationName),
 		slog.String("user_id", userID),
 	)
 
-	err := m.client.AssignIdpManagerPermissions(ctx, organizationName, userID)
+	err := m.client.AssignIdpManagerPermissions(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("failed to assign IdP manager permissions: %w", err)
 	}
 
 	m.logger.InfoContext(ctx, "IdP manager permissions assigned",
-		slog.String("organization", organizationName),
 		slog.String("user_id", userID),
 	)
 	return nil
