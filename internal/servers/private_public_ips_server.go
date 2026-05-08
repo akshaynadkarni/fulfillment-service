@@ -34,11 +34,11 @@ import (
 // validPublicIPTransitions defines the allowed state transitions for PublicIP resources.
 // The key is the current state and the value is the list of valid target states.
 var validPublicIPTransitions = map[privatev1.PublicIPState][]privatev1.PublicIPState{
-	privatev1.PublicIPState_PUBLIC_IP_STATE_PENDING:   {privatev1.PublicIPState_PUBLIC_IP_STATE_ALLOCATED},
-	privatev1.PublicIPState_PUBLIC_IP_STATE_ALLOCATED: {privatev1.PublicIPState_PUBLIC_IP_STATE_ATTACHING, privatev1.PublicIPState_PUBLIC_IP_STATE_RELEASING},
-	privatev1.PublicIPState_PUBLIC_IP_STATE_ATTACHING: {privatev1.PublicIPState_PUBLIC_IP_STATE_ATTACHED},
-	privatev1.PublicIPState_PUBLIC_IP_STATE_ATTACHED:  {privatev1.PublicIPState_PUBLIC_IP_STATE_RELEASING},
-	privatev1.PublicIPState_PUBLIC_IP_STATE_RELEASING: {privatev1.PublicIPState_PUBLIC_IP_STATE_ALLOCATED},
+	privatev1.PublicIPState_PUBLIC_IP_STATE_PENDING:   {privatev1.PublicIPState_PUBLIC_IP_STATE_ALLOCATED, privatev1.PublicIPState_PUBLIC_IP_STATE_FAILED},
+	privatev1.PublicIPState_PUBLIC_IP_STATE_ALLOCATED: {privatev1.PublicIPState_PUBLIC_IP_STATE_ATTACHING, privatev1.PublicIPState_PUBLIC_IP_STATE_RELEASING, privatev1.PublicIPState_PUBLIC_IP_STATE_FAILED},
+	privatev1.PublicIPState_PUBLIC_IP_STATE_ATTACHING: {privatev1.PublicIPState_PUBLIC_IP_STATE_ATTACHED, privatev1.PublicIPState_PUBLIC_IP_STATE_FAILED},
+	privatev1.PublicIPState_PUBLIC_IP_STATE_ATTACHED:  {privatev1.PublicIPState_PUBLIC_IP_STATE_RELEASING, privatev1.PublicIPState_PUBLIC_IP_STATE_FAILED},
+	privatev1.PublicIPState_PUBLIC_IP_STATE_RELEASING: {privatev1.PublicIPState_PUBLIC_IP_STATE_ALLOCATED, privatev1.PublicIPState_PUBLIC_IP_STATE_FAILED},
 }
 
 // PrivatePublicIPsServerBuilder contains the data and logic needed to create a PrivatePublicIPsServer.
@@ -189,6 +189,15 @@ func (s *PrivatePublicIPsServer) Create(ctx context.Context,
 	err = s.validatePoolReference(ctx, poolID)
 	if err != nil {
 		return
+	}
+
+	// Set initial state to PENDING
+	if publicIP.GetStatus() == nil {
+		publicIP.SetStatus(privatev1.PublicIPStatus_builder{
+			State: privatev1.PublicIPState_PUBLIC_IP_STATE_PENDING,
+		}.Build())
+	} else {
+		publicIP.GetStatus().SetState(privatev1.PublicIPState_PUBLIC_IP_STATE_PENDING)
 	}
 
 	// Create the PublicIP:
