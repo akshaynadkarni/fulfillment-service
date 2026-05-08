@@ -275,6 +275,23 @@ var _ = Describe("Private public IPs server", func() {
 			Expect(err).ToNot(HaveOccurred())
 		})
 
+		It("creates PublicIP with PENDING initial state", func() {
+			response, err := publicIPsServer.Create(ctx, privatev1.PublicIPsCreateRequest_builder{
+				Object: privatev1.PublicIP_builder{
+					Metadata: privatev1.Metadata_builder{
+						Tenants: []string{"shared"},
+					}.Build(),
+					Spec: privatev1.PublicIPSpec_builder{
+						Pool: poolID,
+					}.Build(),
+				}.Build(),
+			}.Build())
+			Expect(err).ToNot(HaveOccurred())
+			Expect(response.GetObject().GetStatus()).ToNot(BeNil())
+			Expect(response.GetObject().GetStatus().GetState()).To(
+				Equal(privatev1.PublicIPState_PUBLIC_IP_STATE_PENDING))
+		})
+
 		It("creates PublicIP and generates ID", func() {
 			response, err := publicIPsServer.Create(ctx, privatev1.PublicIPsCreateRequest_builder{
 				Object: privatev1.PublicIP_builder{
@@ -672,6 +689,87 @@ var _ = Describe("Private public IPs server", func() {
 			Expect(updated.GetStatus().GetState()).To(Equal(privatev1.PublicIPState_PUBLIC_IP_STATE_ALLOCATED))
 		})
 
+		It("accepts PENDING to FAILED transition", func() {
+			object := createPublicIPInState(publicIPsServer, privatev1.PublicIPState_PUBLIC_IP_STATE_PENDING)
+			updated := transitionTo(object, privatev1.PublicIPState_PUBLIC_IP_STATE_FAILED)
+			Expect(updated.GetStatus().GetState()).To(Equal(privatev1.PublicIPState_PUBLIC_IP_STATE_FAILED))
+		})
+
+		It("accepts ATTACHING to FAILED transition", func() {
+			object := createPublicIPInState(publicIPsServer, privatev1.PublicIPState_PUBLIC_IP_STATE_ATTACHING)
+			updated := transitionTo(object, privatev1.PublicIPState_PUBLIC_IP_STATE_FAILED)
+			Expect(updated.GetStatus().GetState()).To(Equal(privatev1.PublicIPState_PUBLIC_IP_STATE_FAILED))
+		})
+
+		It("accepts RELEASING to FAILED transition", func() {
+			object := createPublicIPInState(publicIPsServer, privatev1.PublicIPState_PUBLIC_IP_STATE_RELEASING)
+			updated := transitionTo(object, privatev1.PublicIPState_PUBLIC_IP_STATE_FAILED)
+			Expect(updated.GetStatus().GetState()).To(Equal(privatev1.PublicIPState_PUBLIC_IP_STATE_FAILED))
+		})
+
+		It("accepts FAILED to ALLOCATED transition", func() {
+			object := createPublicIPInState(publicIPsServer, privatev1.PublicIPState_PUBLIC_IP_STATE_FAILED)
+			updated := transitionTo(object, privatev1.PublicIPState_PUBLIC_IP_STATE_ALLOCATED)
+			Expect(updated.GetStatus().GetState()).To(Equal(privatev1.PublicIPState_PUBLIC_IP_STATE_ALLOCATED))
+		})
+
+		It("accepts FAILED to ATTACHED transition", func() {
+			object := createPublicIPInState(publicIPsServer, privatev1.PublicIPState_PUBLIC_IP_STATE_FAILED)
+			updated := transitionTo(object, privatev1.PublicIPState_PUBLIC_IP_STATE_ATTACHED)
+			Expect(updated.GetStatus().GetState()).To(Equal(privatev1.PublicIPState_PUBLIC_IP_STATE_ATTACHED))
+		})
+
+		It("rejects FAILED to PENDING transition", func() {
+			object := createPublicIPInState(publicIPsServer, privatev1.PublicIPState_PUBLIC_IP_STATE_FAILED)
+			setStateOnObject(object, privatev1.PublicIPState_PUBLIC_IP_STATE_PENDING)
+			_, err := publicIPsServer.Update(ctx, privatev1.PublicIPsUpdateRequest_builder{
+				Object: object,
+			}.Build())
+			Expect(err).To(HaveOccurred())
+			status, ok := grpcstatus.FromError(err)
+			Expect(ok).To(BeTrue())
+			Expect(status.Code()).To(Equal(grpccodes.FailedPrecondition))
+			Expect(err.Error()).To(ContainSubstring("invalid state transition"))
+		})
+
+		It("rejects FAILED to ATTACHING transition", func() {
+			object := createPublicIPInState(publicIPsServer, privatev1.PublicIPState_PUBLIC_IP_STATE_FAILED)
+			setStateOnObject(object, privatev1.PublicIPState_PUBLIC_IP_STATE_ATTACHING)
+			_, err := publicIPsServer.Update(ctx, privatev1.PublicIPsUpdateRequest_builder{
+				Object: object,
+			}.Build())
+			Expect(err).To(HaveOccurred())
+			status, ok := grpcstatus.FromError(err)
+			Expect(ok).To(BeTrue())
+			Expect(status.Code()).To(Equal(grpccodes.FailedPrecondition))
+			Expect(err.Error()).To(ContainSubstring("invalid state transition"))
+		})
+
+		It("rejects FAILED to RELEASING transition", func() {
+			object := createPublicIPInState(publicIPsServer, privatev1.PublicIPState_PUBLIC_IP_STATE_FAILED)
+			setStateOnObject(object, privatev1.PublicIPState_PUBLIC_IP_STATE_RELEASING)
+			_, err := publicIPsServer.Update(ctx, privatev1.PublicIPsUpdateRequest_builder{
+				Object: object,
+			}.Build())
+			Expect(err).To(HaveOccurred())
+			status, ok := grpcstatus.FromError(err)
+			Expect(ok).To(BeTrue())
+			Expect(status.Code()).To(Equal(grpccodes.FailedPrecondition))
+			Expect(err.Error()).To(ContainSubstring("invalid state transition"))
+		})
+
+		It("accepts ALLOCATED to FAILED transition", func() {
+			object := createPublicIPInState(publicIPsServer, privatev1.PublicIPState_PUBLIC_IP_STATE_ALLOCATED)
+			updated := transitionTo(object, privatev1.PublicIPState_PUBLIC_IP_STATE_FAILED)
+			Expect(updated.GetStatus().GetState()).To(Equal(privatev1.PublicIPState_PUBLIC_IP_STATE_FAILED))
+		})
+
+		It("accepts ATTACHED to FAILED transition", func() {
+			object := createPublicIPInState(publicIPsServer, privatev1.PublicIPState_PUBLIC_IP_STATE_ATTACHED)
+			updated := transitionTo(object, privatev1.PublicIPState_PUBLIC_IP_STATE_FAILED)
+			Expect(updated.GetStatus().GetState()).To(Equal(privatev1.PublicIPState_PUBLIC_IP_STATE_FAILED))
+		})
+
 		It("rejects PENDING to ATTACHED transition", func() {
 			object := createPublicIPInState(publicIPsServer, privatev1.PublicIPState_PUBLIC_IP_STATE_PENDING)
 			setStateOnObject(object, privatev1.PublicIPState_PUBLIC_IP_STATE_ATTACHED)
@@ -790,6 +888,15 @@ var _ = Describe("Private public IPs server", func() {
 
 		It("allows Delete when state is PENDING", func() {
 			object := createPublicIPInState(publicIPsServer, privatev1.PublicIPState_PUBLIC_IP_STATE_PENDING)
+
+			_, err := publicIPsServer.Delete(ctx, privatev1.PublicIPsDeleteRequest_builder{
+				Id: object.GetId(),
+			}.Build())
+			Expect(err).ToNot(HaveOccurred())
+		})
+
+		It("allows Delete when state is FAILED", func() {
+			object := createPublicIPInState(publicIPsServer, privatev1.PublicIPState_PUBLIC_IP_STATE_FAILED)
 
 			_, err := publicIPsServer.Delete(ctx, privatev1.PublicIPsDeleteRequest_builder{
 				Id: object.GetId(),
