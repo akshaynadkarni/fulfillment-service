@@ -47,13 +47,6 @@ var _ = Describe("Tenancy logic", func() {
 
 		// Create a context:
 		ctx = context.Background()
-		ctx = auth.ContextWithSubject(
-			ctx,
-			&auth.Subject{
-				User:    "system",
-				Tenants: collections.NewUniversalSet[string](),
-			},
-		)
 
 		// Prepare the database pool:
 		db := server.MakeDatabase()
@@ -280,5 +273,68 @@ var _ = Describe("Tenancy logic", func() {
 		Expect(cluster).ToNot(BeNil())
 		tenants := cluster.GetMetadata().GetTenants()
 		Expect(tenants).To(ConsistOf("my-tenant"))
+	})
+
+	It("Rejects object creation when assigned tenants are invisible to the user", func() {
+		// Create a tenancy logic that returns visible tenants:
+		visible := collections.NewSet("my-tenant")
+		tenancy := auth.NewMockTenancyLogic(ctrl)
+		tenancy.EXPECT().DetermineAssignableTenants(gomock.Any()).
+			Return(visible, nil).
+			AnyTimes()
+		tenancy.EXPECT().DetermineDefaultTenants(gomock.Any()).
+			Return(visible, nil).
+			AnyTimes()
+		tenancy.EXPECT().DetermineVisibleTenants(gomock.Any()).
+			Return(visible, nil).
+			AnyTimes()
+
+		// Create the template:
+		templatesDao, err := dao.NewGenericDAO[*privatev1.ClusterTemplate]().
+			SetLogger(logger).
+			SetTenancyLogic(tenancy).
+			Build()
+		Expect(err).ToNot(HaveOccurred())
+		_, err = templatesDao.Create().
+			SetObject(privatev1.ClusterTemplate_builder{
+				Id: "our-template",
+				Metadata: privatev1.Metadata_builder{
+					Tenants: []string{
+						"my-tenant",
+						"your-tenant",
+					},
+				}.Build(),
+			}.Build(),
+			).Do(ctx)
+		Expect(err).ToNot(HaveOccurred())
+
+		// Create the clusters server:
+		clustersServer, err := NewClustersServer().
+			SetLogger(logger).
+			SetAttributionLogic(attribution).
+			SetTenancyLogic(tenancy).
+			SetScheme(testScheme).
+			Build()
+		Expect(err).ToNot(HaveOccurred())
+
+		// Attempt to create a an object with a tenant that is invisible to the user and verify that it fails:
+		response, err := clustersServer.Create(ctx, publicv1.ClustersCreateRequest_builder{
+			Object: publicv1.Cluster_builder{
+				Metadata: publicv1.Metadata_builder{
+					Tenants: []string{
+						"your-tenant",
+					},
+				}.Build(),
+				Spec: publicv1.ClusterSpec_builder{
+					Template: "our-template",
+				}.Build(),
+			}.Build(),
+		}.Build())
+		Expect(response).To(BeNil())
+		Expect(err).To(HaveOccurred())
+		status, ok := grpcstatus.FromError(err)
+		Expect(ok).To(BeTrue())
+		Expect(status.Code()).To(Equal(grpccodes.PermissionDenied))
+		Expect(status.Message()).To(Equal("tenant 'your-tenant' doesn't exist"))
 	})
 })
