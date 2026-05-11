@@ -283,7 +283,6 @@ func (m *OrganizationManager) createBreakGlassAccount(ctx context.Context, confi
 // assignIdpManagerPermissions assigns limited IdP manager permissions to a user.
 // This grants the user permissions to manage users and identity providers but not
 // critical realm settings.
-// The implementation is provider-specific (delegated to the IdP client).
 func (m *OrganizationManager) assignIdpManagerPermissions(ctx context.Context, organizationName, userID string) error {
 	m.logger.InfoContext(ctx, "Assigning IdP manager permissions to user",
 		slog.String("organization", organizationName),
@@ -303,6 +302,7 @@ func (m *OrganizationManager) assignIdpManagerPermissions(ctx context.Context, o
 }
 
 // DeleteOrganization deletes an IdP organization and all its resources.
+// The implementation handles provider-specific cleanup (e.g., Keycloak deletes break-glass account first).
 func (m *OrganizationManager) DeleteOrganization(ctx context.Context, organizationName string) error {
 	m.logger.InfoContext(ctx, "Deleting IdP organization",
 		slog.String("organization", organizationName),
