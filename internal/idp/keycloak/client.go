@@ -570,13 +570,35 @@ func (c *Client) AssignOrganizationAdminPermissions(ctx context.Context, organiz
 	return nil
 }
 
+func (c *Client) GetRealmRole(ctx context.Context, roleName string) (keycloakRole, error) {
+	response, err := c.httpClient.DoRequest(ctx, http.MethodGet, fmt.Sprintf("/admin/realms/%s/roles/%s", c.realmName, url.PathEscape(roleName)), nil)
+	if err != nil {
+		return keycloakRole{}, fmt.Errorf("failed to get role: %w", err)
+	}
+	defer response.Body.Close()
+	var kcRole keycloakRole
+	if err = json.NewDecoder(response.Body).Decode(&kcRole); err != nil {
+		return keycloakRole{}, fmt.Errorf("failed to decode role response: %w", err)
+	}
+	return kcRole, nil
+}
+
 // AssignIdpManagerPermissions grants limited IdP management permissions to the specified user.
 //
-// For Keycloak, this assigns a limited set of organization-level admin roles to the user.
-// Intended for the break-glass account which can manage users and identity providers but cannot modify critical
+// For Keycloak, this assigns a tenant-idp-manager role to the user.
+// Intended for the break-glass account which can manage user roles and identity providers but cannot modify critical
 // organization settings, realm settings, or authorization policies.
-func (c *Client) AssignIdpManagerPermissions(ctx context.Context, organizationName, userID string) error {
-	// TODO: implement function
+func (c *Client) AssignIdpManagerPermissions(ctx context.Context, userID string) error {
+	role, err := c.GetRealmRole(ctx, "tenant-idp-manager")
+	if err != nil {
+		return fmt.Errorf("failed to get tenant-idp-manager role from Keycloak: %w", err)
+	}
+	// Keycloak role assignment API expects an array of roles
+	response, err := c.httpClient.DoRequest(ctx, http.MethodPost, fmt.Sprintf("/admin/realms/%s/users/%s/role-mappings/realm", c.realmName, url.PathEscape(userID)), []keycloakRole{role})
+	if err != nil {
+		return fmt.Errorf("failed to assign role to user: %w", err)
+	}
+	defer response.Body.Close()
 	return nil
 }
 
