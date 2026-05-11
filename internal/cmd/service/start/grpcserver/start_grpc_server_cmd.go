@@ -439,6 +439,34 @@ func (c *runnerContext) run(cmd *cobra.Command, argv []string) error {
 	}
 	privatev1.RegisterClusterTemplatesServer(grpcServer, privateClusterTemplatesServer)
 
+	// Create the private cluster catalog items server:
+	c.logger.InfoContext(ctx, "Creating private cluster catalog items server")
+	privateClusterCatalogItemsServer, err := servers.NewPrivateClusterCatalogItemsServer().
+		SetLogger(c.logger).
+		SetNotifier(notifier).
+		SetAttributionLogic(privateAttributionLogic).
+		SetTenancyLogic(tenancyLogic).
+		SetMetricsRegisterer(metricsRegisterer).
+		Build()
+	if err != nil {
+		return fmt.Errorf("failed to create private cluster catalog items server: %w", err)
+	}
+	privatev1.RegisterClusterCatalogItemsServer(grpcServer, privateClusterCatalogItemsServer)
+
+	// Create the private compute instance catalog items server:
+	c.logger.InfoContext(ctx, "Creating private compute instance catalog items server")
+	privateComputeInstanceCatalogItemsServer, err := servers.NewPrivateComputeInstanceCatalogItemsServer().
+		SetLogger(c.logger).
+		SetNotifier(notifier).
+		SetAttributionLogic(privateAttributionLogic).
+		SetTenancyLogic(tenancyLogic).
+		SetMetricsRegisterer(metricsRegisterer).
+		Build()
+	if err != nil {
+		return fmt.Errorf("failed to create private compute instance catalog items server: %w", err)
+	}
+	privatev1.RegisterComputeInstanceCatalogItemsServer(grpcServer, privateComputeInstanceCatalogItemsServer)
+
 	// Create the runtime scheme for typed OSAC API objects:
 	hubScheme, err := hubscheme.NewHub()
 	if err != nil {

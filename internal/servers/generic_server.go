@@ -856,6 +856,10 @@ func (s *GenericServer[O]) setPayload(event *privatev1.Event, object proto.Messa
 		event.SetRoleBinding(object)
 	case *privatev1.Project:
 		event.SetProject(object)
+	case *privatev1.ClusterCatalogItem:
+		event.SetClusterCatalogItem(object)
+	case *privatev1.ComputeInstanceCatalogItem:
+		event.SetComputeInstanceCatalogItem(object)
 	default:
 		return fmt.Errorf("unknown object type '%T'", object)
 	}

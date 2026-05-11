@@ -211,6 +211,10 @@ func (c *runnerContext) run(cmd *cobra.Command, argv []string) error {
 	if err != nil {
 		return err
 	}
+	err = privatev1.RegisterClusterCatalogItemsHandler(ctx, gatewayMux, c.grpcClient)
+	if err != nil {
+		return err
+	}
 	err = privatev1.RegisterClustersHandler(ctx, gatewayMux, c.grpcClient)
 	if err != nil {
 		return err
@@ -228,6 +232,10 @@ func (c *runnerContext) run(cmd *cobra.Command, argv []string) error {
 		return err
 	}
 	err = privatev1.RegisterComputeInstanceTemplatesHandler(ctx, gatewayMux, c.grpcClient)
+	if err != nil {
+		return err
+	}
+	err = privatev1.RegisterComputeInstanceCatalogItemsHandler(ctx, gatewayMux, c.grpcClient)
 	if err != nil {
 		return err
 	}
