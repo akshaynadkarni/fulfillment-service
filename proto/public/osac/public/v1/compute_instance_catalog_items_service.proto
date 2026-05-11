@@ -16,6 +16,7 @@ syntax = "proto3";
 package osac.public.v1;
 
 import "google/api/annotations.proto";
+import "google/protobuf/field_mask.proto";
 import "osac/public/v1/compute_instance_catalog_item_type.proto";
 
 message ComputeInstanceCatalogItemsListRequest {
@@ -46,6 +47,34 @@ message ComputeInstanceCatalogItemsGetResponse {
   ComputeInstanceCatalogItem object = 1;
 }
 
+message ComputeInstanceCatalogItemsCreateRequest {
+  ComputeInstanceCatalogItem object = 1;
+}
+
+message ComputeInstanceCatalogItemsCreateResponse {
+  ComputeInstanceCatalogItem object = 1;
+}
+
+message ComputeInstanceCatalogItemsUpdateRequest {
+  ComputeInstanceCatalogItem object = 1;
+  google.protobuf.FieldMask update_mask = 2;
+
+  // Lock enables optimistic locking. When set to true, the server verifies that the current version of the object
+  // matches the value of the metadata.version field of the submitted object. If they differ the update will be
+  // rejected. This is useful to prevent lost updates when multiple clients are modifying the same object concurrently.
+  bool lock = 3;
+}
+
+message ComputeInstanceCatalogItemsUpdateResponse {
+  ComputeInstanceCatalogItem object = 1;
+}
+
+message ComputeInstanceCatalogItemsDeleteRequest {
+  string id = 1;
+}
+
+message ComputeInstanceCatalogItemsDeleteResponse {}
+
 service ComputeInstanceCatalogItems {
   // Retrieves the list of compute instance catalog items.
   rpc List(ComputeInstanceCatalogItemsListRequest) returns (ComputeInstanceCatalogItemsListResponse) {
@@ -58,5 +87,28 @@ service ComputeInstanceCatalogItems {
       get: "/api/fulfillment/v1/compute_instance_catalog_items/{id}"
       response_body: "object"
     };
+  }
+
+  // Creates a new compute instance catalog item.
+  rpc Create(ComputeInstanceCatalogItemsCreateRequest) returns (ComputeInstanceCatalogItemsCreateResponse) {
+    option (google.api.http) = {
+      post: "/api/fulfillment/v1/compute_instance_catalog_items"
+      body: "object"
+      response_body: "object"
+    };
+  }
+
+  // Updates an existing compute instance catalog item.
+  rpc Update(ComputeInstanceCatalogItemsUpdateRequest) returns (ComputeInstanceCatalogItemsUpdateResponse) {
+    option (google.api.http) = {
+      patch: "/api/fulfillment/v1/compute_instance_catalog_items/{object.id}"
+      body: "object"
+      response_body: "object"
+    };
+  }
+
+  // Deletes a compute instance catalog item.
+  rpc Delete(ComputeInstanceCatalogItemsDeleteRequest) returns (ComputeInstanceCatalogItemsDeleteResponse) {
+    option (google.api.http) = {delete: "/api/fulfillment/v1/compute_instance_catalog_items/{id}"};
   }
 }

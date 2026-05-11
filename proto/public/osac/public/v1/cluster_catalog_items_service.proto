@@ -16,6 +16,7 @@ syntax = "proto3";
 package osac.public.v1;
 
 import "google/api/annotations.proto";
+import "google/protobuf/field_mask.proto";
 import "osac/public/v1/cluster_catalog_item_type.proto";
 
 message ClusterCatalogItemsListRequest {
@@ -46,6 +47,34 @@ message ClusterCatalogItemsGetResponse {
   ClusterCatalogItem object = 1;
 }
 
+message ClusterCatalogItemsCreateRequest {
+  ClusterCatalogItem object = 1;
+}
+
+message ClusterCatalogItemsCreateResponse {
+  ClusterCatalogItem object = 1;
+}
+
+message ClusterCatalogItemsUpdateRequest {
+  ClusterCatalogItem object = 1;
+  google.protobuf.FieldMask update_mask = 2;
+
+  // Lock enables optimistic locking. When set to true, the server verifies that the current version of the object
+  // matches the value of the metadata.version field of the submitted object. If they differ the update will be
+  // rejected. This is useful to prevent lost updates when multiple clients are modifying the same object concurrently.
+  bool lock = 3;
+}
+
+message ClusterCatalogItemsUpdateResponse {
+  ClusterCatalogItem object = 1;
+}
+
+message ClusterCatalogItemsDeleteRequest {
+  string id = 1;
+}
+
+message ClusterCatalogItemsDeleteResponse {}
+
 service ClusterCatalogItems {
   // Retrieves the list of cluster catalog items.
   rpc List(ClusterCatalogItemsListRequest) returns (ClusterCatalogItemsListResponse) {
@@ -58,5 +87,28 @@ service ClusterCatalogItems {
       get: "/api/fulfillment/v1/cluster_catalog_items/{id}"
       response_body: "object"
     };
+  }
+
+  // Creates a new cluster catalog item.
+  rpc Create(ClusterCatalogItemsCreateRequest) returns (ClusterCatalogItemsCreateResponse) {
+    option (google.api.http) = {
+      post: "/api/fulfillment/v1/cluster_catalog_items"
+      body: "object"
+      response_body: "object"
+    };
+  }
+
+  // Updates an existing cluster catalog item.
+  rpc Update(ClusterCatalogItemsUpdateRequest) returns (ClusterCatalogItemsUpdateResponse) {
+    option (google.api.http) = {
+      patch: "/api/fulfillment/v1/cluster_catalog_items/{object.id}"
+      body: "object"
+      response_body: "object"
+    };
+  }
+
+  // Deletes a cluster catalog item.
+  rpc Delete(ClusterCatalogItemsDeleteRequest) returns (ClusterCatalogItemsDeleteResponse) {
+    option (google.api.http) = {delete: "/api/fulfillment/v1/cluster_catalog_items/{id}"};
   }
 }

@@ -32,8 +32,11 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ClusterCatalogItems_List_FullMethodName = "/osac.public.v1.ClusterCatalogItems/List"
-	ClusterCatalogItems_Get_FullMethodName  = "/osac.public.v1.ClusterCatalogItems/Get"
+	ClusterCatalogItems_List_FullMethodName   = "/osac.public.v1.ClusterCatalogItems/List"
+	ClusterCatalogItems_Get_FullMethodName    = "/osac.public.v1.ClusterCatalogItems/Get"
+	ClusterCatalogItems_Create_FullMethodName = "/osac.public.v1.ClusterCatalogItems/Create"
+	ClusterCatalogItems_Update_FullMethodName = "/osac.public.v1.ClusterCatalogItems/Update"
+	ClusterCatalogItems_Delete_FullMethodName = "/osac.public.v1.ClusterCatalogItems/Delete"
 )
 
 // ClusterCatalogItemsClient is the client API for ClusterCatalogItems service.
@@ -44,6 +47,12 @@ type ClusterCatalogItemsClient interface {
 	List(ctx context.Context, in *ClusterCatalogItemsListRequest, opts ...grpc.CallOption) (*ClusterCatalogItemsListResponse, error)
 	// Retrieves the details of one specific cluster catalog item.
 	Get(ctx context.Context, in *ClusterCatalogItemsGetRequest, opts ...grpc.CallOption) (*ClusterCatalogItemsGetResponse, error)
+	// Creates a new cluster catalog item.
+	Create(ctx context.Context, in *ClusterCatalogItemsCreateRequest, opts ...grpc.CallOption) (*ClusterCatalogItemsCreateResponse, error)
+	// Updates an existing cluster catalog item.
+	Update(ctx context.Context, in *ClusterCatalogItemsUpdateRequest, opts ...grpc.CallOption) (*ClusterCatalogItemsUpdateResponse, error)
+	// Deletes a cluster catalog item.
+	Delete(ctx context.Context, in *ClusterCatalogItemsDeleteRequest, opts ...grpc.CallOption) (*ClusterCatalogItemsDeleteResponse, error)
 }
 
 type clusterCatalogItemsClient struct {
@@ -74,6 +83,36 @@ func (c *clusterCatalogItemsClient) Get(ctx context.Context, in *ClusterCatalogI
 	return out, nil
 }
 
+func (c *clusterCatalogItemsClient) Create(ctx context.Context, in *ClusterCatalogItemsCreateRequest, opts ...grpc.CallOption) (*ClusterCatalogItemsCreateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ClusterCatalogItemsCreateResponse)
+	err := c.cc.Invoke(ctx, ClusterCatalogItems_Create_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *clusterCatalogItemsClient) Update(ctx context.Context, in *ClusterCatalogItemsUpdateRequest, opts ...grpc.CallOption) (*ClusterCatalogItemsUpdateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ClusterCatalogItemsUpdateResponse)
+	err := c.cc.Invoke(ctx, ClusterCatalogItems_Update_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *clusterCatalogItemsClient) Delete(ctx context.Context, in *ClusterCatalogItemsDeleteRequest, opts ...grpc.CallOption) (*ClusterCatalogItemsDeleteResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ClusterCatalogItemsDeleteResponse)
+	err := c.cc.Invoke(ctx, ClusterCatalogItems_Delete_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ClusterCatalogItemsServer is the server API for ClusterCatalogItems service.
 // All implementations must embed UnimplementedClusterCatalogItemsServer
 // for forward compatibility.
@@ -82,6 +121,12 @@ type ClusterCatalogItemsServer interface {
 	List(context.Context, *ClusterCatalogItemsListRequest) (*ClusterCatalogItemsListResponse, error)
 	// Retrieves the details of one specific cluster catalog item.
 	Get(context.Context, *ClusterCatalogItemsGetRequest) (*ClusterCatalogItemsGetResponse, error)
+	// Creates a new cluster catalog item.
+	Create(context.Context, *ClusterCatalogItemsCreateRequest) (*ClusterCatalogItemsCreateResponse, error)
+	// Updates an existing cluster catalog item.
+	Update(context.Context, *ClusterCatalogItemsUpdateRequest) (*ClusterCatalogItemsUpdateResponse, error)
+	// Deletes a cluster catalog item.
+	Delete(context.Context, *ClusterCatalogItemsDeleteRequest) (*ClusterCatalogItemsDeleteResponse, error)
 	mustEmbedUnimplementedClusterCatalogItemsServer()
 }
 
@@ -97,6 +142,15 @@ func (UnimplementedClusterCatalogItemsServer) List(context.Context, *ClusterCata
 }
 func (UnimplementedClusterCatalogItemsServer) Get(context.Context, *ClusterCatalogItemsGetRequest) (*ClusterCatalogItemsGetResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Get not implemented")
+}
+func (UnimplementedClusterCatalogItemsServer) Create(context.Context, *ClusterCatalogItemsCreateRequest) (*ClusterCatalogItemsCreateResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Create not implemented")
+}
+func (UnimplementedClusterCatalogItemsServer) Update(context.Context, *ClusterCatalogItemsUpdateRequest) (*ClusterCatalogItemsUpdateResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Update not implemented")
+}
+func (UnimplementedClusterCatalogItemsServer) Delete(context.Context, *ClusterCatalogItemsDeleteRequest) (*ClusterCatalogItemsDeleteResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Delete not implemented")
 }
 func (UnimplementedClusterCatalogItemsServer) mustEmbedUnimplementedClusterCatalogItemsServer() {}
 func (UnimplementedClusterCatalogItemsServer) testEmbeddedByValue()                             {}
@@ -155,6 +209,60 @@ func _ClusterCatalogItems_Get_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ClusterCatalogItems_Create_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ClusterCatalogItemsCreateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ClusterCatalogItemsServer).Create(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ClusterCatalogItems_Create_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ClusterCatalogItemsServer).Create(ctx, req.(*ClusterCatalogItemsCreateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ClusterCatalogItems_Update_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ClusterCatalogItemsUpdateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ClusterCatalogItemsServer).Update(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ClusterCatalogItems_Update_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ClusterCatalogItemsServer).Update(ctx, req.(*ClusterCatalogItemsUpdateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ClusterCatalogItems_Delete_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ClusterCatalogItemsDeleteRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ClusterCatalogItemsServer).Delete(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ClusterCatalogItems_Delete_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ClusterCatalogItemsServer).Delete(ctx, req.(*ClusterCatalogItemsDeleteRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ClusterCatalogItems_ServiceDesc is the grpc.ServiceDesc for ClusterCatalogItems service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -169,6 +277,18 @@ var ClusterCatalogItems_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Get",
 			Handler:    _ClusterCatalogItems_Get_Handler,
+		},
+		{
+			MethodName: "Create",
+			Handler:    _ClusterCatalogItems_Create_Handler,
+		},
+		{
+			MethodName: "Update",
+			Handler:    _ClusterCatalogItems_Update_Handler,
+		},
+		{
+			MethodName: "Delete",
+			Handler:    _ClusterCatalogItems_Delete_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
