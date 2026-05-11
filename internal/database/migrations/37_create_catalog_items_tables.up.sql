@@ -36,6 +36,7 @@ create table cluster_catalog_items (
   tenants text[] not null default '{}',
   labels jsonb not null default '{}'::jsonb,
   annotations jsonb not null default '{}'::jsonb,
+  version integer not null default 0,
   data jsonb not null
 );
 
@@ -49,6 +50,7 @@ create table archived_cluster_catalog_items (
   tenants text[] not null default '{}',
   labels jsonb not null default '{}'::jsonb,
   annotations jsonb not null default '{}'::jsonb,
+  version integer not null default 0,
   data jsonb not null
 );
 
@@ -67,6 +69,7 @@ create table compute_instance_catalog_items (
   tenants text[] not null default '{}',
   labels jsonb not null default '{}'::jsonb,
   annotations jsonb not null default '{}'::jsonb,
+  version integer not null default 0,
   data jsonb not null
 );
 
@@ -80,6 +83,7 @@ create table archived_compute_instance_catalog_items (
   tenants text[] not null default '{}',
   labels jsonb not null default '{}'::jsonb,
   annotations jsonb not null default '{}'::jsonb,
+  version integer not null default 0,
   data jsonb not null
 );
 

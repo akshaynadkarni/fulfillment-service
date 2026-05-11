@@ -15,7 +15,7 @@ syntax = "proto3";
 
 package osac.public.v1;
 
-import "google/protobuf/struct.proto";
+import "osac/public/v1/field_definition_type.proto";
 import "osac/public/v1/metadata_type.proto";
 
 // A cluster catalog item defines a curated infrastructure offering that references an underlying cluster template.
@@ -43,22 +43,4 @@ message ClusterCatalogItem {
 
   // Definitions of the fields that users can or cannot set when creating a resource from this catalog item.
   repeated FieldDefinition field_definitions = 8;
-}
-
-// Defines a single field on the resource spec that the catalog item controls.
-message FieldDefinition {
-  // Dot-notation path referencing a field in the resource spec.
-  string path = 1;
-
-  // Human friendly label for this field, suitable for displaying in a UI.
-  string display_name = 2;
-
-  // Whether the user is allowed to set this field.
-  bool editable = 3;
-
-  // Default value for this field.
-  google.protobuf.Value default = 4;
-
-  // Optional JSON Schema (draft 2020-12) for validating user-provided values of editable fields.
-  string validation_schema = 5;
 }

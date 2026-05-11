@@ -23,6 +23,7 @@ message ClusterCatalogItemsListRequest {
   optional int32 offset = 1;
   optional int32 limit = 2;
   optional string filter = 3;
+  optional string order = 4;
 }
 
 message ClusterCatalogItemsListResponse {
