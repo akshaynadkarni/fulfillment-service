@@ -233,6 +233,8 @@ spec:
               "/osac.public.v1.ComputeInstances/Get",
               "/osac.public.v1.ComputeInstances/List",
               "/osac.public.v1.ComputeInstances/Update",
+              "/osac.public.v1.Console/Connect",
+              "/osac.public.v1.Console/GetAccess",
               "/osac.public.v1.Events/Watch",
               "/osac.public.v1.HostTypes/Get",
               "/osac.public.v1.HostTypes/List",
