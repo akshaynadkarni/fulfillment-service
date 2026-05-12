@@ -411,6 +411,8 @@ func (s *EventsServer) extractMetadata(ctx context.Context, event *privatev1.Eve
 		return event.GetRole().GetMetadata()
 	case event.HasRoleBinding():
 		return event.GetRoleBinding().GetMetadata()
+	case event.HasProject():
+		return event.GetProject().GetMetadata()
 	default:
 		s.logger.ErrorContext(
 			ctx,

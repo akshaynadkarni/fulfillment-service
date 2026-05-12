@@ -43,6 +43,7 @@ import (
 	"github.com/osac-project/fulfillment-service/internal/controllers/cluster"
 	"github.com/osac-project/fulfillment-service/internal/controllers/computeinstance"
 	"github.com/osac-project/fulfillment-service/internal/controllers/organization"
+	"github.com/osac-project/fulfillment-service/internal/controllers/project"
 	"github.com/osac-project/fulfillment-service/internal/controllers/publicip"
 	"github.com/osac-project/fulfillment-service/internal/controllers/publicippool"
 	"github.com/osac-project/fulfillment-service/internal/controllers/role"
@@ -723,6 +724,42 @@ func (r *runnerContext) run(cmd *cobra.Command, argv []string) error {
 			r.logger.InfoContext(
 				ctx,
 				"Organization reconciler failed",
+				slog.Any("error", err),
+			)
+		}
+	}()
+
+	// Create the project reconciler:
+	r.logger.InfoContext(ctx, "Creating project reconciler")
+	projectReconcilerFunction, err := project.NewFunction().
+		SetLogger(r.logger).
+		SetConnection(r.client).
+		Build()
+	if err != nil {
+		return fmt.Errorf("failed to create project reconciler function: %w", err)
+	}
+	projectReconciler, err := controllers.NewReconciler[*privatev1.Project]().
+		SetLogger(r.logger).
+		SetName("project").
+		SetClient(r.client).
+		SetFunction(projectReconcilerFunction.Run).
+		SetEventFilter("has(event.project)").
+		SetHealthReporter(healthAggregator).
+		Build()
+	if err != nil {
+		return fmt.Errorf("failed to create project reconciler: %w", err)
+	}
+
+	// Start the project reconciler:
+	r.logger.InfoContext(ctx, "Starting project reconciler")
+	go func() {
+		err := projectReconciler.Start(ctx)
+		if err == nil || errors.Is(err, context.Canceled) {
+			r.logger.InfoContext(ctx, "Project reconciler finished")
+		} else {
+			r.logger.InfoContext(
+				ctx,
+				"Project reconciler failed",
 				slog.Any("error", err),
 			)
 		}
