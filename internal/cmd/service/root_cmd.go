@@ -19,6 +19,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/osac-project/fulfillment-service/internal/cmd/service/dev"
+	"github.com/osac-project/fulfillment-service/internal/cmd/service/migrate"
 	"github.com/osac-project/fulfillment-service/internal/cmd/service/probe"
 	"github.com/osac-project/fulfillment-service/internal/cmd/service/start"
 	"github.com/osac-project/fulfillment-service/internal/cmd/service/version"
@@ -41,6 +42,7 @@ func Root() *cobra.Command {
 
 	// Add commands:
 	result.AddCommand(dev.Cmd())
+	result.AddCommand(migrate.Cmd())
 	result.AddCommand(probe.Cmd())
 	result.AddCommand(start.Cmd())
 	result.AddCommand(version.Cmd())
