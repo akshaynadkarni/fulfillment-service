@@ -199,9 +199,16 @@ var _ = Describe("Version", func() {
 			version := object.GetMetadata().GetVersion()
 
 			// Try repeatedly till the update succeeds. It may initially fail because the controller may
-			// update the object before us.
+			// update the object before us. Re-read the current version before each attempt to avoid
+			// sending a stale version that will never match.
 			Eventually(
 				func(g Gomega) {
+					getResponse, err := clustersClient.Get(ctx, publicv1.ClustersGetRequest_builder{
+						Id: id,
+					}.Build())
+					g.Expect(err).ToNot(HaveOccurred())
+					version = getResponse.GetObject().GetMetadata().GetVersion()
+
 					updateResponse, err := clustersClient.Update(ctx, publicv1.ClustersUpdateRequest_builder{
 						Object: publicv1.Cluster_builder{
 							Id: id,
@@ -216,7 +223,6 @@ var _ = Describe("Version", func() {
 					}.Build())
 					g.Expect(err).ToNot(HaveOccurred())
 					object = updateResponse.GetObject()
-					version = object.GetMetadata().GetVersion()
 				},
 				10*time.Second,
 				100*time.Millisecond,
