@@ -55,7 +55,7 @@ var _ = Describe("Describe PublicIP", func() {
 			Expect(output).To(ContainSubstring("203.0.113.42"))
 			Expect(output).To(ContainSubstring("ALLOCATED"))
 			Expect(output).To(ContainSubstring("IP allocated"))
-			Expect(output).To(ContainSubstring("true"))
+			Expect(output).To(MatchRegexp(`Attached:\s+true`))
 		})
 
 		It("should show '-' for optional fields when status is nil", func() {
