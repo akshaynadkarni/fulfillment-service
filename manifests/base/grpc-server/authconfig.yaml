@@ -22,37 +22,6 @@ spec:
     "fulfillment-api":
       kubernetesTokenReview:
         audiences:
-        # TODO: This is the default audience for the Kubernetes API server. We should probably create a custom audience,
-        # for example `fulfillment-api`, but then the users will need to create tokens for that audience. For example:
-        #
-        # $ kubectl create token -n osac --audience=fulfillment-api client
-        #
-        # It is not clear to me if we can also use that audience for the tokens generated automatically for the service
-        # accounts of other pods, for example for the `controller` pods. It may be possible using a projected service
-        # account token, something like this:
-        #
-        # apiVersion: v1
-        # kind: Pod
-        # metadata:
-        #   name: my
-        # spec:
-        #   containers:
-        #   - volumeMounts:
-        #     - mountPath: /var/run/secrets/tokens
-        #       name: api-token
-        #   volumes:
-        #   - name: api-token
-        #     projected:
-        #       sources:
-        #       - serviceAccountToken:
-        #           path: api-token
-        #           audience: fulfillment-api
-        #
-        # But that needs to be tested.
-        #
-        # Note also that different flavours of Kubernetes use different audicences for the service account tokens. Kind
-        # uses the full DNS name `kubernetes.default.svc.cluster.local`, but OpenShift uses the `kubernetes.default.svc`
-        # abbreviation.
         - https://kubernetes.default.svc
         - https://kubernetes.default.svc.cluster.local
       overrides:
@@ -89,6 +58,18 @@ spec:
             "admins",
           }
 
+          # Tenant admin roles - users with these roles can manage users in their tenant
+          tenant_admin_roles := {
+            "tenant-admin",
+            "tenant-user-manager",
+          }
+
+          # Tenant IdP manager roles - users with these roles can manage IdP config and assign roles
+          tenant_idp_manager_roles := {
+            "tenant-admin",
+            "tenant-idp-manager",
+          }
+
           # Get the gRPC method:
           grpc_method := input.context.request.http.path
 
@@ -108,6 +89,38 @@ spec:
             input.auth.identity.authnMethod == "jwt"
           }
 
+          # Get the subject's tenant(s) from JWT claims or service account namespace
+          # For JWT users, this comes from the "organization" scope which is in defaultClientScopes.
+          # The organization claim is required for tenant admins and IdP managers.
+          # For regular users without organization claim, fall back to groups.
+          default subject_tenants = []
+          subject_tenants = input.auth.identity.organization if {
+            input.auth.identity.authnMethod == "jwt"
+            input.auth.identity.organization
+          }
+          subject_tenants = input.auth.identity.organizations if {
+            input.auth.identity.authnMethod == "jwt"
+            input.auth.identity.organizations
+          }
+          # Fallback to groups for JWT users without organization claim
+          subject_tenants = subject_groups if {
+            input.auth.identity.authnMethod == "jwt"
+            not input.auth.identity.organization
+            not input.auth.identity.organizations
+          }
+          # For service accounts, use groups as tenants
+          subject_tenants = subject_groups if {
+            input.auth.identity.authnMethod == "serviceaccount"
+          }
+
+          # Get the subject's realm roles from JWT
+          default subject_realm_roles = []
+          subject_realm_roles = input.auth.identity.realm_access.roles if {
+            input.auth.identity.authnMethod == "jwt"
+            input.auth.identity.realm_access
+            input.auth.identity.realm_access.roles
+          }
+
           # Check if an account is an admin account:
           default is_admin = false
           is_admin if {
@@ -121,10 +134,38 @@ spec:
             group in admin_groups
           }
 
-          # Check if an account is a client account:
+          # Check if an account is a tenant admin (can manage users AND IdP in their tenant):
+          default is_tenant_admin = false
+          is_tenant_admin if {
+            some role in subject_realm_roles
+            role in tenant_admin_roles
+          }
+
+          # Check if an account is a tenant IdP manager (can ONLY manage IdP, NOT users):
+          default is_tenant_idp_manager = false
+          is_tenant_idp_manager if {
+            some role in subject_realm_roles
+            role in tenant_idp_manager_roles
+          }
+
+          # Check if an account is a regular client (no admin or tenant management roles):
           default is_client = false
           is_client if {
             not is_admin
+            not is_tenant_admin
+            not is_tenant_idp_manager
+          }
+
+          # Check if account has client-level permissions (clients, tenant admins, or IdP managers):
+          default has_client_permissions = false
+          has_client_permissions if {
+            is_client
+          }
+          has_client_permissions if {
+            is_tenant_admin
+          }
+          has_client_permissions if {
+            is_tenant_idp_manager
           }
 
           # Allow metadata, reflection and health to everyone:
@@ -138,9 +179,9 @@ spec:
             startswith(grpc_method, "/grpc.health.")
           }
 
-          # Allow specific methods to clients:
+          # Allow specific methods to clients (and tenant admins/IdP managers who inherit client permissions):
           allow if {
-            is_client
+            has_client_permissions
             grpc_method in {
               "/osac.public.v1.ClusterTemplates/Get",
               "/osac.public.v1.ClusterTemplates/List",
@@ -196,6 +237,27 @@ spec:
             }
           }
 
+          # Tenant-scoped user management for tenant admins
+          # Note: Tenant admins can manage users. IdP managers cannot (they only manage IdP config).
+          # OPA performs method-level authorization (can this user call this method?).
+          # The application layer enforces resource-level authorization via the generic server's
+          # determineAssignedTenants validation, which ensures users can only assign tenants they have visibility to.
+          allow if {
+            is_tenant_admin
+            grpc_method in {
+              "/osac.public.v1.Users/Create",
+              "/osac.public.v1.Users/Get",
+              "/osac.public.v1.Users/List",
+              "/osac.public.v1.Users/Update",
+              "/osac.public.v1.Users/Delete",
+            }
+          }
+
+          # Tenant-scoped IdP management (when APIs are added, e.g., IdentityProviders/*, RoleBindings/*)
+          # For now, no IdP management APIs exist, so no rules needed yet
+          # TODO: Add allow rules for (is_tenant_admin or is_tenant_idp_manager) when IdP APIs are implemented
+          # Both tenant admins (full permissions) and tenant IdP managers (IdP-only) should be allowed
+
           # Allow everything to admins:
           allow if {
             is_admin
@@ -216,5 +278,5 @@ spec:
                   auth.authorization.default.is_admin
                     ? ["*"]
                     : auth.identity.authnMethod == "jwt"
-                      ? auth.identity.groups
+                      ? auth.authorization.default.subject_tenants
                       : [auth.identity.user.username.split(":")[2]]
