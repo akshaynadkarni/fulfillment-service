@@ -21,6 +21,7 @@ import "osac/public/v1/compute_instance_template_type.proto";
 import "osac/public/v1/compute_instance_type.proto";
 import "osac/public/v1/host_type_type.proto";
 import "osac/public/v1/role_binding_type.proto";
+import "osac/public/v1/project_type.proto";
 import "osac/public/v1/role_type.proto";
 
 // Represents events delivered by the server.
@@ -40,6 +41,7 @@ message Event {
     ComputeInstance compute_instance = 8;
     Role role = 9;
     RoleBinding role_binding = 10;
+    Project project = 11;
   }
 }
 

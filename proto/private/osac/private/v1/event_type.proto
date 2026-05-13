@@ -26,6 +26,7 @@ import "osac/private/v1/hub_type.proto";
 import "osac/private/v1/lease_type.proto";
 import "osac/private/v1/network_class_type.proto";
 import "osac/private/v1/organization_type.proto";
+import "osac/private/v1/project_type.proto";
 import "osac/private/v1/public_ip_pool_type.proto";
 import "osac/private/v1/public_ip_type.proto";
 import "osac/private/v1/role_binding_type.proto";
@@ -64,6 +65,7 @@ message Event {
     RoleBinding role_binding = 21;
     ClusterCatalogItem cluster_catalog_item = 22;
     ComputeInstanceCatalogItem compute_instance_catalog_item = 23;
+    Project project = 24;
   }
 }
 
