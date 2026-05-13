@@ -11,15 +11,20 @@ Unless required by applicable law or agreed to in writing, software distributed 
 language governing permissions and limitations under the License.
 */
 
+//go:generate mockgen -source=../../api/osac/private/v1/projects_service_grpc.pb.go -destination=projects_client_mock.go -package=project ProjectsClient
+
 package project
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"slices"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	privatev1 "github.com/osac-project/fulfillment-service/internal/api/osac/private/v1"
@@ -120,7 +125,127 @@ func (t *task) update(ctx context.Context) error {
 	}
 
 	t.setDefaults()
+
+	state := t.project.GetStatus().GetState()
+
+	// Skip reconciliation for terminal states to prevent infinite loops.
+	if state == privatev1.ProjectState_PROJECT_STATE_FAILED ||
+		state == privatev1.ProjectState_PROJECT_STATE_DELETE_FAILED {
+		return nil
+	}
+
+	// For active projects, no re-validation needed (parent is immutable).
+	if state == privatev1.ProjectState_PROJECT_STATE_ACTIVE {
+		return nil
+	}
+
+	// Project is PENDING or UNSPECIFIED, perform validation
+	return t.validateAndActivate(ctx)
+}
+
+// validateAndActivate validates the project hierarchy and transitions to ACTIVE or FAILED state.
+func (t *task) validateAndActivate(ctx context.Context) error {
+	t.project.GetStatus().SetState(privatev1.ProjectState_PROJECT_STATE_PENDING)
+
+	// Validate parent project if specified
+	if t.project.GetSpec().HasParent() {
+		parentID := t.project.GetSpec().GetParent()
+
+		// Prevent self-reference
+		if parentID == t.project.GetId() {
+			t.project.GetStatus().SetState(privatev1.ProjectState_PROJECT_STATE_FAILED)
+			t.project.GetStatus().SetMessage("Project cannot be its own parent")
+			return nil
+		}
+
+		// Fetch parent project
+		parentResp, err := t.r.projectsClient.Get(ctx, privatev1.ProjectsGetRequest_builder{
+			Id: parentID,
+		}.Build())
+		if err != nil {
+			if status.Code(err) == codes.NotFound {
+				t.project.GetStatus().SetState(privatev1.ProjectState_PROJECT_STATE_FAILED)
+				t.project.GetStatus().SetMessage(fmt.Sprintf("Parent project not found: %s", parentID))
+				return nil
+			}
+			// Transient error - return it to retry later
+			return fmt.Errorf("failed to fetch parent project: %w", err)
+		}
+
+		parentProject := parentResp.GetObject()
+
+		// Validate parent is in ACTIVE state
+		parentState := parentProject.GetStatus().GetState()
+		if parentState != privatev1.ProjectState_PROJECT_STATE_ACTIVE {
+			t.project.GetStatus().SetState(privatev1.ProjectState_PROJECT_STATE_FAILED)
+			t.project.GetStatus().SetMessage(fmt.Sprintf("Parent project %s is not in ACTIVE state (current state: %s)", parentProject.GetId(), parentState))
+			return nil
+		}
+
+		// Check for circular dependencies by traversing up the hierarchy
+		if err := t.checkCircularDependency(ctx, parentProject); err != nil {
+			t.project.GetStatus().SetState(privatev1.ProjectState_PROJECT_STATE_FAILED)
+			t.project.GetStatus().SetMessage(err.Error())
+			return nil
+		}
+	}
+
+	//TODO: Sync project to Openshift Cluster(s)
+	//TODO: Create Keycloak Authorization Resource
+
+	// All validations passed
+	t.project.GetStatus().SetState(privatev1.ProjectState_PROJECT_STATE_ACTIVE)
+	t.project.GetStatus().ClearMessage()
+
+	t.r.logger.DebugContext(ctx, "Project activated",
+		slog.String("project_id", t.project.GetId()),
+		slog.String("project_name", t.project.GetMetadata().GetName()),
+	)
+
 	return nil
+}
+
+// checkCircularDependency traverses the parent hierarchy to detect circular dependencies.
+// Accepts the already-fetched immediate parent to avoid redundant RPC calls.
+func (t *task) checkCircularDependency(ctx context.Context, parent *privatev1.Project) error {
+	visited := make(map[string]bool)
+	visited[t.project.GetId()] = true
+	visited[parent.GetId()] = true
+
+	currentParent := parent
+	maxDepth := 100 // Prevent infinite loops from unexpected state
+
+	for depth := 0; depth < maxDepth; depth++ {
+		// If parent has no parent, we've reached the top of the hierarchy
+		if !currentParent.GetSpec().HasParent() {
+			return nil
+		}
+
+		nextParentID := currentParent.GetSpec().GetParent()
+
+		// Check if we've seen this parent before (circular dependency)
+		if visited[nextParentID] {
+			return fmt.Errorf("Circular dependency detected in project hierarchy")
+		}
+		visited[nextParentID] = true
+
+		// Fetch the next parent project
+		parentResp, err := t.r.projectsClient.Get(ctx, privatev1.ProjectsGetRequest_builder{
+			Id: nextParentID,
+		}.Build())
+		if err != nil {
+			if status.Code(err) == codes.NotFound {
+				// Parent not found, but we already validated it exists above, so this is transient
+				return fmt.Errorf("parent project disappeared during validation: %w", err)
+			}
+			return fmt.Errorf("failed to fetch parent project during circular dependency check: %w", err)
+		}
+
+		currentParent = parentResp.GetObject()
+	}
+
+	// If we hit max depth, treat it as a circular dependency
+	return fmt.Errorf("Project hierarchy exceeds maximum depth of %d", maxDepth)
 }
 
 // delete performs the deletion cleanup for a project.
