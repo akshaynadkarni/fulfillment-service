@@ -56,7 +56,7 @@ message PublicIPAttachmentSpec {
   // Must reference the ID of an existing PublicIP in ALLOCATED state that is not already
   // attached (status.attached == false). Only one PublicIPAttachment may exist per PublicIP.
   //
-  // Example: "pip-abc123"
+  // Example: "019728a4-3f5c-7def-8abc-1234567890ab"
   string public_ip = 1 [
     (google.api.field_behavior) = REQUIRED,
     (google.api.field_behavior) = IMMUTABLE
@@ -70,7 +70,7 @@ message PublicIPAttachmentSpec {
     // Must reference the ID of an existing ComputeInstance in RUNNING state. Only one
     // PublicIPAttachment may exist per ComputeInstance.
     //
-    // Example: "ci-xyz789"
+    // Example: "01972f1b-a4e9-7c82-9def-abcdef123456"
     string compute_instance = 2;
   }
 }

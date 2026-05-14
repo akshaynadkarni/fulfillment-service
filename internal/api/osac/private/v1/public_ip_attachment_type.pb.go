@@ -274,7 +274,7 @@ type PublicIPAttachmentSpec struct {
 	// Must reference the ID of an existing PublicIP in ALLOCATED state that is not already
 	// attached (status.attached == false). Only one PublicIPAttachment may exist per PublicIP.
 	//
-	// Example: "pip-abc123"
+	// Example: "019728a4-3f5c-7def-8abc-1234567890ab"
 	PublicIp string `protobuf:"bytes,1,opt,name=public_ip,json=publicIp,proto3" json:"public_ip,omitempty"`
 	// Target resource to attach the public IP to. Exactly one target field must be set.
 	// Required and immutable after creation.
@@ -391,7 +391,7 @@ type PublicIPAttachmentSpec_builder struct {
 	// Must reference the ID of an existing PublicIP in ALLOCATED state that is not already
 	// attached (status.attached == false). Only one PublicIPAttachment may exist per PublicIP.
 	//
-	// Example: "pip-abc123"
+	// Example: "019728a4-3f5c-7def-8abc-1234567890ab"
 	PublicIp string
 	// Target resource to attach the public IP to. Exactly one target field must be set.
 	// Required and immutable after creation.
@@ -402,7 +402,7 @@ type PublicIPAttachmentSpec_builder struct {
 	// Must reference the ID of an existing ComputeInstance in RUNNING state. Only one
 	// PublicIPAttachment may exist per ComputeInstance.
 	//
-	// Example: "ci-xyz789"
+	// Example: "01972f1b-a4e9-7c82-9def-abcdef123456"
 	ComputeInstance *string
 	// -- end of Target
 }
@@ -438,7 +438,7 @@ type PublicIPAttachmentSpec_ComputeInstance struct {
 	// Must reference the ID of an existing ComputeInstance in RUNNING state. Only one
 	// PublicIPAttachment may exist per ComputeInstance.
 	//
-	// Example: "ci-xyz789"
+	// Example: "01972f1b-a4e9-7c82-9def-abcdef123456"
 	ComputeInstance string `protobuf:"bytes,2,opt,name=compute_instance,json=computeInstance,proto3,oneof"`
 }
 
