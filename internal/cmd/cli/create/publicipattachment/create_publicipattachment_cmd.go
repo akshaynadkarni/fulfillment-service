@@ -88,9 +88,9 @@ func (c *runnerContext) run(cmd *cobra.Command, args []string) error {
 	defer conn.Close()
 
 	// Resolve the PublicIP by name or ID:
-	pipsClient := publicv1.NewPublicIPsClient(conn)
+	publicIPsClient := publicv1.NewPublicIPsClient(conn)
 	filter := fmt.Sprintf(`this.id == %[1]q || this.metadata.name == %[1]q`, c.args.publicIP)
-	listResponse, err := pipsClient.List(ctx, publicv1.PublicIPsListRequest_builder{
+	listResponse, err := publicIPsClient.List(ctx, publicv1.PublicIPsListRequest_builder{
 		Filter: &filter,
 	}.Build())
 	if err != nil {
