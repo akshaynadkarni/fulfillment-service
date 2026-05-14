@@ -425,6 +425,34 @@ func (c *runnerContext) run(cmd *cobra.Command, argv []string) error {
 	}
 	publicv1.RegisterClusterTemplatesServer(grpcServer, clusterTemplatesServer)
 
+	// Create the cluster catalog items server:
+	c.logger.InfoContext(ctx, "Creating cluster catalog items server")
+	clusterCatalogItemsServer, err := servers.NewClusterCatalogItemsServer().
+		SetLogger(c.logger).
+		SetNotifier(notifier).
+		SetAttributionLogic(publicAttributionLogic).
+		SetTenancyLogic(tenancyLogic).
+		SetMetricsRegisterer(metricsRegisterer).
+		Build()
+	if err != nil {
+		return fmt.Errorf("failed to create cluster catalog items server: %w", err)
+	}
+	publicv1.RegisterClusterCatalogItemsServer(grpcServer, clusterCatalogItemsServer)
+
+	// Create the compute instance catalog items server:
+	c.logger.InfoContext(ctx, "Creating compute instance catalog items server")
+	computeInstanceCatalogItemsServer, err := servers.NewComputeInstanceCatalogItemsServer().
+		SetLogger(c.logger).
+		SetNotifier(notifier).
+		SetAttributionLogic(publicAttributionLogic).
+		SetTenancyLogic(tenancyLogic).
+		SetMetricsRegisterer(metricsRegisterer).
+		Build()
+	if err != nil {
+		return fmt.Errorf("failed to create compute instance catalog items server: %w", err)
+	}
+	publicv1.RegisterComputeInstanceCatalogItemsServer(grpcServer, computeInstanceCatalogItemsServer)
+
 	// Create the private cluster templates server:
 	c.logger.InfoContext(ctx, "Creating private cluster templates server")
 	privateClusterTemplatesServer, err := servers.NewPrivateClusterTemplatesServer().
