@@ -1,0 +1,63 @@
+name: Bump submodule in osac-installer
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+jobs:
+  bump:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    env:
+      SUBMODULE_PATH: base/osac-fulfillment-service
+      SUBMODULE_NAME: osac-fulfillment-service
+    steps:
+      - name: Checkout osac-installer
+        uses: actions/checkout@v4
+        with:
+          repository: osac-project/osac-installer
+          token: ${{ secrets.OSAC_BOT_PAT }}
+
+      - name: Update submodule pointer
+        id: update
+        run: |
+          git submodule update --init "$SUBMODULE_PATH"
+          cd "$SUBMODULE_PATH"
+          git fetch origin
+          git checkout ${{ github.event.pull_request.merge_commit_sha }}
+          cd ../..
+          git add "$SUBMODULE_PATH"
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create bump PR
+        if: steps.update.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.OSAC_BOT_PAT }}
+          BRANCH: bump/${{ env.SUBMODULE_NAME }}/pr-${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_AUTHOR_ID: ${{ github.event.pull_request.user.id }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          git config user.name "$PR_AUTHOR"
+          git config user.email "${PR_AUTHOR_ID}+${PR_AUTHOR}@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git commit -m "Bump ${SUBMODULE_NAME}: ${PR_TITLE}"
+          git push origin "$BRANCH"
+          gh pr create \
+            --repo osac-project/osac-installer \
+            --base main \
+            --head "$BRANCH" \
+            --title "Bump ${SUBMODULE_NAME}: ${PR_TITLE}" \
+            --body "Bumps \`${SUBMODULE_NAME}\` submodule.
+
+Original PR: ${PR_URL}
+Author: @${PR_AUTHOR}
+Merge commit: \`${MERGE_SHA}\`" \
+            --assignee "$PR_AUTHOR"
